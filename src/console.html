@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CM360 Trafficking Console</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f5f6f8; color: #1a1a2e; font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #d0d3da; border-radius: 3px; }
+
+  .header { border-bottom: 1px solid #e0e2e8; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.95); backdrop-filter: blur(12px); position: sticky; top: 0; z-index: 100; }
+  .logo { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, #4f6df5, #7b5ea7); display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono'; font-weight: 700; font-size: 13px; color: white; }
+  .header-title { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; color: #1a1a2e; }
+  .header-sub { font-family: 'JetBrains Mono'; font-size: 10px; color: #9ca3af; margin-top: 1px; }
+
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+  .status-dot.idle { background: #aaa; } .status-dot.ready { background: #22c55e; } .status-dot.processing { background: #f59e0b; animation: pulse 1.5s infinite; } .status-dot.error { background: #ef4444; } .status-dot.done { background: #22c55e; }
+  .status-text { font-family: 'JetBrains Mono'; font-size: 11px; color: #6b7280; }
+
+  .main { display: flex; max-width: 1200px; margin: 0 auto; }
+  .left { flex: 1; padding: 24px 24px 120px 24px; overflow-y: auto; }
+  .right { width: 420px; border-left: 1px solid #e0e2e8; padding: 24px 20px; background: #f0f1f4; overflow-y: auto; display: none; animation: fadeUp 0.3s ease; }
+  .right.show { display: block; }
+
+  .section { background: #ffffff; border: 1px solid #e0e2e8; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .step-num { font-family: 'JetBrains Mono'; font-size: 11px; font-weight: 700; color: #4f6df5; background: rgba(79,109,245,0.08); padding: 3px 10px; border-radius: 4px; }
+  .section-title { font-weight: 700; font-size: 15px; color: #1a1a2e; }
+
+  label { font-family: 'JetBrains Mono'; font-size: 10.5px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; display: block; }
+  input, select { background: #f8f9fb; border: 1px solid #dde0e6; border-radius: 6px; padding: 10px 14px; color: #1a1a2e; font-family: 'DM Sans'; font-size: 14px; width: 100%; outline: none; transition: border-color 0.2s; }
+  input:focus { border-color: #4f6df5; box-shadow: 0 0 0 2px rgba(79,109,245,0.1); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+
+  .card { background: #f8f9fb; border: 1px solid #e0e2e8; border-radius: 8px; padding: 12px 10px; text-align: center; cursor: pointer; transition: all 0.15s; }
+  .card:hover { border-color: #4f6df5; background: rgba(79,109,245,0.04); }
+  .card.selected { background: rgba(79,109,245,0.08); border-color: #4f6df5; }
+  .card .code { font-weight: 700; font-size: 16px; margin-bottom: 2px; color: #333; }
+  .card.selected .code { color: #4f6df5; }
+  .card .sub { font-size: 11px; color: #6b7280; }
+  .card .meta { font-family: 'JetBrains Mono'; font-size: 10px; color: #9ca3af; margin-top: 4px; }
+
+  .dsp-card { background: #f8f9fb; border: 1px solid #e0e2e8; border-radius: 8px; padding: 16px 18px; cursor: pointer; transition: all 0.15s; }
+  .dsp-card:hover { border-color: #4f6df5; }
+  .dsp-card.selected { background: rgba(79,109,245,0.08); border-color: #4f6df5; }
+  .dsp-card .name { font-weight: 700; font-size: 17px; margin-bottom: 3px; color: #333; }
+  .dsp-card.selected .name { color: #4f6df5; }
+
+  .type-btn { font-family: 'DM Sans'; font-size: 13px; font-weight: 600; padding: 8px 18px; border-radius: 6px; cursor: pointer; transition: all 0.15s; background: #f8f9fb; color: #6b7280; border: 1px solid #e0e2e8; }
+  .type-btn.selected { background: rgba(79,109,245,0.08); color: #4f6df5; border-color: #4f6df5; }
+
+  .generated { background: #f0f4ff; border-radius: 6px; padding: 10px 14px; font-family: 'JetBrains Mono'; font-size: 13px; color: #4f6df5; border: 1px solid #dce3ff; margin-top: 14px; }
+  .generated .hint { font-size: 10px; color: #6b7280; display: block; margin-bottom: 3px; }
+
+  .tracking-box { margin-top: 12px; background: #f8f9fb; border-radius: 6px; padding: 14px; border: 1px solid #e0e2e8; }
+  .tracking-box .url { font-family: 'JetBrains Mono'; font-size: 11px; color: #6b7280; word-break: break-all; line-height: 1.7; }
+
+  .drop-zone { border: 2px dashed #d0d3da; border-radius: 10px; padding: 44px 28px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+  .drop-zone:hover { border-color: #4f6df5; }
+
+  .creative-row { background: #f8f9fb; border: 1px solid #e0e2e8; border-radius: 8px; padding: 10px; display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+  .creative-thumb { width: 48px; height: 36px; border-radius: 4px; overflow: hidden; background: #eef0f4; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .creative-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .size-input { width: 56px; font-size: 12px; padding: 5px 6px; text-align: center; }
+  .auto-badge { font-family: 'JetBrains Mono'; font-size: 9px; color: #16a34a; background: rgba(34,197,94,0.1); padding: 2px 5px; border-radius: 3px; }
+  .remove-btn { background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 11px; padding: 3px; }
+
+  .placement-preview { margin-top: 10px; background: rgba(79,109,245,0.03); border: 1px solid rgba(79,109,245,0.1); border-radius: 8px; padding: 12px; }
+  .placement-chip { font-family: 'JetBrains Mono'; font-size: 11px; padding: 4px 10px; border-radius: 4px; background: #f0f4ff; color: #555; border: 1px solid #dce3ff; display: inline-block; margin: 2px; }
+  .platform-badge { font-size: 9px; padding: 1px 4px; border-radius: 2px; margin-left: 4px; }
+  .platform-badge.ios { color: #4f6df5; background: rgba(79,109,245,0.1); }
+  .platform-badge.android { color: #16a34a; background: rgba(34,197,94,0.1); }
+
+  .btn-primary { font-family: 'DM Sans'; font-size: 14px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; padding: 10px 26px; background: linear-gradient(135deg, #4f6df5, #7b5ea7); color: white; box-shadow: 0 4px 20px rgba(79,109,245,0.25); transition: all 0.15s; }
+  .btn-primary:disabled { background: #d0d3da; color: #9ca3af; cursor: not-allowed; box-shadow: none; }
+  .btn-execute { background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 4px 16px rgba(34,197,94,0.25); padding: 10px; flex: 2; }
+  .btn-execute:disabled { background: #d0d3da; }
+  .btn-export { background: #f8f9fb; color: #6b7280; padding: 9px; border: 1px solid #e0e2e8; flex: 1; }
+  .btn-upload { font-family: 'DM Sans'; font-size: 13px; font-weight: 600; background: #4f6df5; color: white; border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+
+  .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; border-top: 1px solid #e0e2e8; background: rgba(255,255,255,0.95); backdrop-filter: blur(12px); padding: 12px 28px; display: flex; justify-content: space-between; align-items: center; z-index: 100; }
+  .bottom-bar .info { font-family: 'JetBrains Mono'; font-size: 11px; color: #9ca3af; }
+
+  .plan-step { background: #ffffff; border: 1px solid #e0e2e8; border-radius: 6px; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; margin-bottom: 5px; }
+  .step-circle { width: 22px; height: 22px; border-radius: 50%; background: #f0f4ff; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono'; font-size: 10px; font-weight: 700; color: #4f6df5; flex-shrink: 0; }
+  .step-action { font-family: 'JetBrains Mono'; font-size: 10px; color: #7b5ea7; margin-bottom: 2px; }
+  .step-desc { font-size: 12.5px; color: #444; line-height: 1.4; }
+
+  .exec-step { background: #ffffff; border: 1px solid #e0e2e8; border-radius: 5px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 4px; }
+  .exec-icon { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+  .exec-icon.success { background: rgba(34,197,94,0.12); color: #16a34a; }
+  .exec-icon.skipped { background: rgba(245,158,11,0.12); color: #d97706; }
+  .exec-icon.error { background: rgba(239,68,68,0.12); color: #dc2626; }
+
+  .log-box { background: #f8f9fb; border: 1px solid #e0e2e8; border-radius: 6px; padding: 8px; font-family: 'JetBrains Mono'; font-size: 10px; max-height: 120px; overflow: auto; margin-top: 18px; }
+  .log-line { margin-bottom: 2px; } .log-line .ts { color: #bbb; } .log-line.err { color: #dc2626; } .log-line.ok { color: #9ca3af; }
+  .app-links { background: #f8f9fb; border-radius: 8px; padding: 16px; border: 1px solid #e0e2e8; }
+  .app-link { display:flex;align-items:center;gap:10px;margin-bottom:6px;font-family:'JetBrains Mono';font-size:11px; }
+  .app-link .badge { background:#f0f4ff;padding:3px 8px;border-radius:4px; }
+  .app-link .badge.ios { color:#4f6df5; } .app-link .badge.android { color:#16a34a; }
+
+  .server-bar { background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.15); border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; font-family: 'JetBrains Mono'; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+  .server-bar.offline { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.15); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="logo">CM</div>
+    <div>
+      <div class="header-title">CM360 Trafficking Console</div>
+      <div class="header-sub">eToro Media · Campaign Manager → DV360 / Yahoo Sync</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="status-dot idle" id="statusDot"></span>
+    <span class="status-text" id="statusText">Ready</span>
+  </div>
+</div>
+
+<div id="serverBar" class="server-bar" style="max-width:1200px;margin:12px auto 0">
+  <span class="status-dot" id="serverDot" style="background:#555"></span>
+  <span id="serverText">Checking server...</span>
+</div>
+
+<div class="main">
+  <div class="left">
+
+    <!-- Mode tabs -->
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+      <button class="type-btn selected" id="modeBuilderBtn" onclick="setMode('builder')" style="flex:1;text-align:center;padding:10px">🔧 Build Campaign</button>
+      <button class="type-btn" id="modeReportBtn" onclick="setMode('report')" style="flex:1;text-align:center;padding:10px">📊 Reporting</button>
+    </div>
+
+    <!-- Builder mode -->
+    <div id="builderMode">
+
+    <!-- 01 DSP -->
+    <div class="section">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <span class="step-num">01</span><span class="section-title">DSP</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="dsp-card" id="dsp-dv360" onclick="selectDsp('dv360')">
+          <div class="name">DV360</div>
+          <div style="font-size:12px;color:#5a5a7a;margin-bottom:4px">Display & Video 360</div>
+          <div style="font-family:'JetBrains Mono';font-size:10px;color:#9ca3af">8 markets</div>
+        </div>
+        <div class="dsp-card" id="dsp-yahoo" onclick="selectDsp('yahoo')">
+          <div class="name">Yahoo</div>
+          <div style="font-size:12px;color:#5a5a7a;margin-bottom:4px">Yahoo DSP</div>
+          <div style="font-family:'JetBrains Mono';font-size:10px;color:#9ca3af">Site ID: 6023654 · UK only</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 02 Market -->
+    <div class="section" id="marketSection" style="opacity:0.4;pointer-events:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <span class="step-num">02</span><span class="section-title">Market</span>
+        <span id="marketMeta" style="font-family:'JetBrains Mono';font-size:11px;color:#333;margin-left:auto"></span>
+      </div>
+      <div class="grid-4" id="countryGrid"></div>
+      <div id="yahooLocked" style="display:none;background:rgba(79,109,245,0.06);border:1px solid rgba(79,109,245,0.12);border-radius:8px;padding:14px 16px;display:flex;align-items:center;gap:12px">
+        <div style="font-weight:700;font-size:18px;color:#4f6df5">UK</div>
+        <div><div style="font-size:13px;color:#6b7280">United Kingdom</div><div style="font-family:'JetBrains Mono';font-size:10px;color:#9ca3af">Yahoo UK only · Site ID: 6023654 · AFFID: 101987</div></div>
+      </div>
+    </div>
+
+    <!-- 03 Campaign -->
+    <div class="section">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <span class="step-num">03</span><span class="section-title">Campaign Details</span>
+      </div>
+      <div class="grid-2-1" style="margin-bottom:14px">
+        <div><label>Campaign Name</label><input id="campaignLabel" placeholder="e.g. ISA, Summer Promo" oninput="updatePreview()"></div>
+        <div><label id="affIdLabel">AFFID</label><input id="affId" placeholder="Select market" oninput="updatePreview()"></div>
+      </div>
+      <div class="grid-2" style="margin-bottom:14px">
+        <div><label>Start Date</label><input type="date" id="startDate" oninput="updatePreview()"></div>
+        <div><label>End Date</label><input type="date" id="endDate" oninput="updatePreview()"></div>
+      </div>
+      <div class="generated" id="namePreview" style="display:none">
+        <span class="hint">GENERATED NAME</span>
+        <span id="namePreviewText"></span>
+      </div>
+    </div>
+
+    <!-- 04 Landing Page -->
+    <div class="section">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <span class="step-num">04</span><span class="section-title">Landing Page</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="type-btn selected" id="typeWeb" onclick="setCampaignType('web')">Web Campaign</button>
+        <button class="type-btn" id="typeApp" onclick="setCampaignType('app')">App Install</button>
+      </div>
+      <div id="webFields">
+        <label>Target URL</label>
+        <input id="targetUrl" placeholder="https://www.etoro.com/investing/isa/" oninput="updatePreview()">
+        <div class="tracking-box" id="trackingBox" style="display:none">
+          <label style="color:#7b5ea7;margin-bottom:8px">GENERATED TRACKING URL</label>
+          <div class="url" id="trackingUrl"></div>
+        </div>
+      </div>
+      <div id="appFields" style="display:none" class="app-links">
+        <div style="font-size:13px;color:#5a5a7a;margin-bottom:12px">App install campaigns use direct store links:</div>
+        <div class="app-link"><span class="badge android">Android</span><span style="color:#6b7280">https://play.google.com/store/apps/details?id=com.etoro.openbook</span></div>
+        <div class="app-link"><span class="badge ios">iOS</span><span style="color:#6b7280">https://apps.apple.com/gb/app/id674984916</span></div>
+      </div>
+    </div>
+
+    <!-- 05 Creatives -->
+    <div class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="step-num">05</span><span class="section-title">Creatives</span>
+          <span id="creativeCount" style="font-family:'JetBrains Mono';font-size:11px;color:#333"></span>
+        </div>
+        <button class="btn-upload" onclick="document.getElementById('fileInput').click()">+ Upload</button>
+        <input type="file" id="fileInput" multiple accept="image/*,.zip,.html,.mp4,.webm" onchange="handleFiles(event)" style="display:none">
+      </div>
+      <div id="dropZone" class="drop-zone" onclick="document.getElementById('fileInput').click()">
+        <div style="font-size:28px;margin-bottom:8px">📁</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px">Drop creative files here</div>
+        <div style="font-size:12px;color:#444">Sizes auto-detected from filenames (e.g. banner_300x250.jpg)</div>
+      </div>
+      <div id="creativeList"></div>
+      <div id="placementPreview" class="placement-preview" style="display:none"></div>
+    </div>
+  </div>
+  </div><!-- end builderMode -->
+
+    <!-- Reporting mode -->
+    <div id="reportMode" style="display:none">
+      <div class="section">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <span class="step-num">📊</span>
+          <span class="section-title">Ask about campaign performance</span>
+        </div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:16px">
+          Ask in natural language — e.g. "How did UK ISA perform last week?" or "Show me creative breakdown for the ICC campaign this month"
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input id="reportQuery" placeholder="e.g. How did UK ISA perform last week?" onkeydown="if(event.key==='Enter')askReport()" style="flex:1">
+          <button class="btn-upload" onclick="askReport()" id="reportBtn">Ask</button>
+        </div>
+
+        <!-- Quick queries -->
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px">
+          <button onclick="setQuery('Show all campaign performance this month')" style="font-family:'JetBrains Mono';font-size:11px;padding:6px 12px;border-radius:4px;background:#f0f4ff;color:#4f6df5;border:1px solid #dce3ff;cursor:pointer">All campaigns this month</button>
+          <button onclick="setQuery('Creative breakdown for the last 7 days')" style="font-family:'JetBrains Mono';font-size:11px;padding:6px 12px;border-radius:4px;background:#f0f4ff;color:#4f6df5;border:1px solid #dce3ff;cursor:pointer">Creative breakdown (7 days)</button>
+          <button onclick="setQuery('Top performing creatives last month')" style="font-family:'JetBrains Mono';font-size:11px;padding:6px 12px;border-radius:4px;background:#f0f4ff;color:#4f6df5;border:1px solid #dce3ff;cursor:pointer">Top creatives (30 days)</button>
+        </div>
+
+        <!-- Results -->
+        <div id="reportLoading" style="display:none;text-align:center;padding:30px 0">
+          <div style="font-size:20px;margin-bottom:8px;animation:pulse 1.5s infinite">📊</div>
+          <div style="font-size:13px;color:#f59e0b">Pulling report from CM360...</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:4px">This may take up to 60 seconds</div>
+        </div>
+
+        <div id="reportResults" style="display:none"></div>
+      </div>
+
+      <!-- Chat history -->
+      <div id="reportHistory"></div>
+    </div>
+
+  </div>
+
+  <!-- Right panel -->
+  <div class="right" id="rightPanel">
+    <div style="font-weight:700;font-size:15px;margin-bottom:18px">Execution Plan</div>
+    <div id="planLoading" style="display:none;text-align:center;padding:40px 0"><div style="font-size:24px;margin-bottom:10px;animation:pulse 1.5s infinite">⚙️</div><div style="font-size:13px;color:#f59e0b">Building plan...</div></div>
+    <div id="planContent" style="display:none"></div>
+    <div id="logBox" class="log-box" style="display:none"></div>
+  </div>
+</div>
+
+<div class="bottom-bar">
+  <div class="info" id="bottomInfo">Configure campaign to begin</div>
+  <button class="btn-primary" id="generateBtn" disabled onclick="generatePlan()">Generate Plan →</button>
+</div>
+
+<script>
+const SERVER = "http://localhost:8360";
+const COUNTRIES = [
+  { code: "UK", label: "United Kingdom", siteId: "6709149", affId: "101987" },
+  { code: "DE", label: "Germany", siteId: "6649760", affId: "117830" },
+  { code: "IT", label: "Italy", siteId: "6027402", affId: "91830" },
+  { code: "FR", label: "France", siteId: "6711321", affId: "95208" },
+  { code: "AE", label: "UAE", siteId: "6748799", affId: "93400" },
+  { code: "CZ", label: "Czechia", siteId: "6640503", affId: "118233" },
+  { code: "NL", label: "Netherlands", siteId: "6648604", affId: "91998" },
+  { code: "AU", label: "Australia", siteId: "6650726", affId: "91661" },
+];
+const YAHOO_SITE_ID = "6023654";
+const APP_URLS = { android: "https://play.google.com/store/apps/details?id=com.etoro.openbook", ios: "https://apps.apple.com/gb/app/id674984916" };
+
+let state = { dsp: "", country: "", campaignType: "web", creatives: [], logs: [] };
+
+// Server check
+async function checkServer() {
+  try {
+    const r = await fetch(SERVER + "/health");
+    if (r.ok) {
+      document.getElementById("serverDot").style.background = "#22c55e";
+      document.getElementById("serverText").textContent = "Server connected";
+      document.getElementById("serverBar").classList.remove("offline");
+      return true;
+    }
+  } catch(e) {}
+  document.getElementById("serverDot").style.background = "#ef4444";
+  document.getElementById("serverText").textContent = "Server offline — run: python server.py";
+  document.getElementById("serverBar").classList.add("offline");
+  return false;
+}
+checkServer();
+
+function setStatus(s, text) {
+  const dot = document.getElementById("statusDot");
+  dot.className = "status-dot " + s;
+  document.getElementById("statusText").textContent = text;
+}
+
+function addLog(msg, err) {
+  state.logs.push({ ts: new Date(), msg, err });
+  const box = document.getElementById("logBox");
+  box.style.display = "block";
+  box.innerHTML = state.logs.map(l =>
+    `<div class="log-line ${l.err ? 'err' : 'ok'}"><span class="ts">${l.ts.toLocaleTimeString()}</span> ${l.msg}</div>`
+  ).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+// DSP
+function selectDsp(dsp) {
+  state.dsp = dsp;
+  document.querySelectorAll(".dsp-card").forEach(c => c.classList.remove("selected"));
+  document.getElementById("dsp-" + dsp).classList.add("selected");
+  const ms = document.getElementById("marketSection");
+  ms.style.opacity = 1; ms.style.pointerEvents = "auto";
+
+  if (dsp === "yahoo") {
+    document.getElementById("countryGrid").style.display = "none";
+    document.getElementById("yahooLocked").style.display = "flex";
+    selectCountry("UK");
+  } else {
+    document.getElementById("countryGrid").style.display = "grid";
+    document.getElementById("yahooLocked").style.display = "none";
+    renderCountries();
+  }
+  updatePreview();
+}
+
+function renderCountries() {
+  const grid = document.getElementById("countryGrid");
+  grid.innerHTML = COUNTRIES.map(c =>
+    `<div class="card ${state.country===c.code?'selected':''}" onclick="selectCountry('${c.code}')">
+      <div class="code">${c.code}</div><div class="sub">${c.label}</div><div class="meta">AFFID: ${c.affId}</div>
+    </div>`
+  ).join("");
+}
+
+function selectCountry(code) {
+  state.country = code;
+  const c = COUNTRIES.find(x => x.code === code);
+  document.getElementById("affId").value = c.affId;
+  const siteId = state.dsp === "yahoo" ? YAHOO_SITE_ID : c.siteId;
+  document.getElementById("marketMeta").textContent = `Site: ${siteId} · AFFID: ${c.affId}`;
+  if (state.dsp !== "yahoo") renderCountries();
+  updatePreview();
+}
+
+// Campaign type
+function setCampaignType(t) {
+  state.campaignType = t;
+  document.getElementById("typeWeb").classList.toggle("selected", t === "web");
+  document.getElementById("typeApp").classList.toggle("selected", t === "app");
+  document.getElementById("webFields").style.display = t === "web" ? "block" : "none";
+  document.getElementById("appFields").style.display = t === "app" ? "block" : "none";
+  updatePreview();
+}
+
+// Creatives
+function parseSizeFromFilename(name) {
+  const m = name.match(/(\d{2,4})\s*[x×_-]\s*(\d{2,4})/i);
+  return m ? { w: parseInt(m[1]), h: parseInt(m[2]) } : null;
+}
+
+function handleFiles(e) {
+  Array.from(e.target.files).forEach(file => {
+    const d = parseSizeFromFilename(file.name);
+    const creative = {
+      id: Date.now() + Math.random(), fileName: file.name, fileSize: file.size,
+      name: file.name.replace(/\.[^.]+$/, ""),
+      width: d ? String(d.w) : "", height: d ? String(d.h) : "",
+      sizeDetected: !!d,
+      preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      fileData: null, mimeType: file.type || "application/octet-stream",
+    };
+    // Read file as base64
+    const reader = new FileReader();
+    reader.onload = () => { creative.fileData = reader.result.split(",")[1]; };
+    reader.readAsDataURL(file);
+    state.creatives.push(creative);
+  });
+  e.target.value = "";
+  renderCreatives();
+  updatePreview();
+}
+
+function removeCreative(id) {
+  state.creatives = state.creatives.filter(c => c.id !== id);
+  renderCreatives();
+  updatePreview();
+}
+
+function updateCreativeSize(id, field, val) {
+  const c = state.creatives.find(x => x.id === id);
+  if (c) c[field] = val;
+  renderPlacementPreview();
+  updatePreview();
+}
+
+function renderCreatives() {
+  const list = document.getElementById("creativeList");
+  const drop = document.getElementById("dropZone");
+  const count = document.getElementById("creativeCount");
+
+  if (state.creatives.length === 0) {
+    drop.style.display = "block"; list.innerHTML = ""; count.textContent = "";
+    document.getElementById("placementPreview").style.display = "none";
+    return;
+  }
+  drop.style.display = "none";
+  count.textContent = state.creatives.length + " files";
+
+  list.innerHTML = state.creatives.map(c =>
+    `<div class="creative-row">
+      <div class="creative-thumb">${c.preview ? `<img src="${c.preview}">` : '📦'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</div>
+        <div style="font-family:'JetBrains Mono';font-size:10px;color:#9ca3af">${(c.fileSize/1024).toFixed(0)}KB</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px">
+        <input class="size-input" type="number" value="${c.width}" placeholder="W" oninput="updateCreativeSize(${c.id},'width',this.value)">
+        <span style="color:#2a2a40;font-size:11px">×</span>
+        <input class="size-input" type="number" value="${c.height}" placeholder="H" oninput="updateCreativeSize(${c.id},'height',this.value)">
+        ${c.sizeDetected ? '<span class="auto-badge">AUTO</span>' : ''}
+        <button class="remove-btn" onclick="removeCreative(${c.id})">✕</button>
+      </div>
+    </div>`
+  ).join("");
+
+  renderPlacementPreview();
+}
+
+function getUniqueSizes() {
+  const map = new Map();
+  state.creatives.filter(c => c.width && c.height).forEach(c => {
+    map.set(`${c.width}x${c.height}`, { w: parseInt(c.width), h: parseInt(c.height) });
+  });
+  return [...map.values()];
+}
+
+function renderPlacementPreview() {
+  const sizes = getUniqueSizes();
+  const pp = document.getElementById("placementPreview");
+  if (!sizes.length || !state.country) { pp.style.display = "none"; return; }
+  pp.style.display = "block";
+
+  const label = document.getElementById("campaignLabel").value || "Campaign";
+  const isApp = state.campaignType === "app";
+  const count = isApp ? sizes.length * 2 : sizes.length;
+
+  let html = `<label style="color:#4f6df5;margin-bottom:6px">AUTO-GENERATED PLACEMENTS <span style="color:#333">${count}${isApp ? ' (×2 for iOS/Android)' : ''}</span></label><div>`;
+
+  if (isApp) {
+    sizes.forEach(s => {
+      html += `<span class="placement-chip">${state.country}_${label}_${s.w}x${s.h}_iOS<span class="platform-badge ios">iOS</span></span>`;
+      html += `<span class="placement-chip">${state.country}_${label}_${s.w}x${s.h}_Android<span class="platform-badge android">Android</span></span>`;
+    });
+  } else {
+    sizes.forEach(s => {
+      html += `<span class="placement-chip">${state.country}_${label}_${s.w}x${s.h}</span>`;
+    });
+  }
+  html += "</div>";
+  pp.innerHTML = html;
+}
+
+// Preview & validation
+function getDspLabel() { return state.dsp === "yahoo" ? "Yahoo" : "DV360"; }
+function getActiveSiteId() { return state.dsp === "yahoo" ? YAHOO_SITE_ID : (COUNTRIES.find(c => c.code === state.country)?.siteId || ""); }
+
+function getFullName() {
+  const label = document.getElementById("campaignLabel").value;
+  const affId = document.getElementById("affId").value;
+  if (!state.country || !label || !affId) return "";
+  return `${getDspLabel()} - ${state.country} - ${label} - ${affId}`;
+}
+
+function getTrackingUrl() {
+  const affId = document.getElementById("affId").value;
+  const url = document.getElementById("targetUrl").value;
+  if (!affId || !url) return "";
+  return `https://med.etoro.com/aw.aspx?A=${affId}&Task=Click&TargetURL=${encodeURIComponent(url)}&dclid=%edclid!&SubAffiliateID34689735`;
+}
+
+function updatePreview() {
+  const name = getFullName();
+  const np = document.getElementById("namePreview");
+  if (name) { np.style.display = "block"; document.getElementById("namePreviewText").textContent = name; }
+  else { np.style.display = "none"; }
+
+  const tu = getTrackingUrl();
+  const tb = document.getElementById("trackingBox");
+  if (tu && state.campaignType === "web") { tb.style.display = "block"; document.getElementById("trackingUrl").textContent = tu; }
+  else { tb.style.display = "none"; }
+
+  renderPlacementPreview();
+
+  // Bottom bar
+  const sizes = getUniqueSizes();
+  const placementCount = state.campaignType === "app" ? sizes.length * 2 : sizes.length;
+  let info = name || "Configure campaign to begin";
+  if (placementCount > 0) info += ` · ${placementCount} placements`;
+  if (state.creatives.length > 0) info += ` · ${state.creatives.length} creatives`;
+  document.getElementById("bottomInfo").textContent = info;
+
+  // Validate
+  const valid = state.dsp && state.country && document.getElementById("campaignLabel").value.trim()
+    && document.getElementById("affId").value.trim() && document.getElementById("startDate").value
+    && document.getElementById("endDate").value && state.creatives.length > 0
+    && state.creatives.every(c => c.width && c.height)
+    && (state.campaignType === "app" || document.getElementById("targetUrl").value.trim());
+  document.getElementById("generateBtn").disabled = !valid;
+}
+
+// Plan generation
+async function generatePlan() {
+  setStatus("processing", "Generating...");
+  document.getElementById("rightPanel").classList.add("show");
+  document.getElementById("planLoading").style.display = "block";
+  document.getElementById("planContent").style.display = "none";
+  state.logs = [];
+  addLog("Building execution plan...");
+
+  const label = document.getElementById("campaignLabel").value;
+  const fullName = getFullName();
+  const country = COUNTRIES.find(c => c.code === state.country);
+  const siteId = getActiveSiteId();
+  const dsp = getDspLabel();
+  const sizes = getUniqueSizes();
+
+  const placements = state.campaignType === "app"
+    ? sizes.flatMap(s => [
+        { name: `${state.country}_${label}_${s.w}x${s.h}_iOS`, siteId, width: s.w, height: s.h, platform: "iOS" },
+        { name: `${state.country}_${label}_${s.w}x${s.h}_Android`, siteId, width: s.w, height: s.h, platform: "Android" },
+      ])
+    : sizes.map(s => ({ name: `${state.country}_${label}_${s.w}x${s.h}`, siteId, width: s.w, height: s.h }));
+
+  const config = {
+    campaign: { name: fullName, advertiser: "eToro Media", dsp, startDate: document.getElementById("startDate").value, endDate: document.getElementById("endDate").value, type: state.campaignType },
+    landingPage: { url: state.campaignType === "web" ? document.getElementById("targetUrl").value : null, trackingUrl: state.campaignType === "web" ? getTrackingUrl() : null, appStoreUrls: state.campaignType === "app" ? APP_URLS : null },
+    country: { code: state.country, label: country.label, siteId },
+    affId: document.getElementById("affId").value,
+    creatives: state.creatives.map(c => ({ name: c.name, fileName: c.fileName, width: parseInt(c.width), height: parseInt(c.height) })),
+    placements,
+  };
+
+  const prompt = `You are a CM360 trafficking assistant for eToro. Given this config, return a structured execution plan as JSON only. No markdown, no backticks, no preamble.
+
+Config:
+${JSON.stringify(config, null, 2)}
+
+Workflow:
+1. Create landing page(s): for web use tracking URL; for app create TWO landing pages
+2. Create campaign (advertiser: eToro Media)
+3. Bulk upload all creatives
+4. For WEB: one placement per unique creative size (site = ${dsp} ${country.label}, ID ${siteId})
+   For APP: TWO placements per size — _iOS and _Android
+5. Create standard ads linking creatives to placements
+
+Return:
+{"summary":"...","steps":[{"order":1,"action":"...","description":"...","details":{}}],"creative_placement_matrix":[{"creative":"...","size":"WxH","placement":"...","ad_name":"..."}],"warnings":[],"naming":{"campaign":"${fullName}","placements":${JSON.stringify(placements.map(p=>p.name))}}}`;
+
+  try {
+    const res = await fetch(SERVER + "/generate-plan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, config }),
+    });
+    const data = await res.json();
+
+    document.getElementById("planLoading").style.display = "none";
+
+    if (data.success && data.plan) {
+      renderPlan(data.plan, config);
+      addLog(`Plan ready — ${data.plan.steps?.length || 0} steps`);
+      setStatus("ready", "Plan generated");
+    } else {
+      document.getElementById("planContent").style.display = "block";
+      document.getElementById("planContent").innerHTML = `<div style="background:#ffffff;border:1px solid #e0e2e8;border-radius:8px;padding:14px;font-family:'JetBrains Mono';font-size:11px;color:#6b7280;white-space:pre-wrap;max-height:400px;overflow:auto">${data.raw || data.error || 'Unknown error'}</div>`;
+      addLog("Parse error", true);
+      setStatus("error", "Error");
+    }
+  } catch (err) {
+    document.getElementById("planLoading").style.display = "none";
+    addLog("Server error: " + err.message, true);
+    setStatus("error", "Error");
+  }
+}
+
+let currentPlan = null;
+let currentConfig = null;
+
+function renderPlan(plan, config) {
+  currentPlan = plan;
+  currentConfig = config;
+  const el = document.getElementById("planContent");
+  el.style.display = "block";
+
+  let html = `<div style="background:rgba(79,109,245,0.05);border:1px solid rgba(79,109,245,0.12);border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#6b7280">${plan.summary || ''}</div>`;
+
+  if (plan.warnings?.length) {
+    html += `<div style="background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.12);border-radius:8px;padding:12px;margin-bottom:16px">${plan.warnings.map(w=>`<div style="font-size:12px;color:#cca;margin-bottom:2px">⚠ ${w}</div>`).join("")}</div>`;
+  }
+
+  if (plan.steps?.length) {
+    html += plan.steps.map(s => `<div class="plan-step"><div class="step-circle">${s.order}</div><div><div class="step-action">${s.action}</div><div class="step-desc">${s.description}</div></div></div>`).join("");
+  }
+
+  if (plan.creative_placement_matrix?.length) {
+    html += `<div style="margin-top:16px"><label style="margin-bottom:6px">Creative → Placement</label>`;
+    html += plan.creative_placement_matrix.map(r => `<div style="background:#ffffff;border:1px solid #e0e2e8;border-radius:6px;padding:9px 12px;margin-bottom:4px;font-size:12px"><div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-weight:600">${r.creative}</span><span style="font-family:'JetBrains Mono';font-size:10px;color:#4f6df5">${r.size}</span></div><div style="font-family:'JetBrains Mono';font-size:10px;color:#6b7280">→ ${r.placement}</div></div>`).join("");
+    html += "</div>";
+  }
+
+  html += `<div style="display:flex;gap:8px;margin-top:14px">
+    <button class="btn-primary btn-export" onclick="exportPlan()" style="display:inline-flex;align-items:center;justify-content:center;font-size:13px;border:1px solid #e0e2e8;cursor:pointer">↓ Export JSON</button>
+    <button class="btn-primary btn-execute" id="executeBtn" onclick="executeCampaign()" style="display:inline-flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer">⚡ Execute in CM360</button>
+  </div>`;
+
+  html += `<div id="execResults"></div>`;
+  el.innerHTML = html;
+}
+
+function exportPlan() {
+  if (!currentPlan) return;
+  const name = getFullName().replace(/\s+/g, "_") || "campaign";
+  const blob = new Blob([JSON.stringify(currentPlan, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name + "_plan.json"; a.click();
+}
+
+async function executeCampaign() {
+  const btn = document.getElementById("executeBtn");
+  btn.disabled = true; btn.textContent = "Executing...";
+  addLog("Checking server...");
+
+  const ok = await checkServer();
+  if (!ok) { addLog("Server offline", true); btn.disabled = false; btn.textContent = "⚡ Execute in CM360"; return; }
+
+  addLog("Uploading creatives & executing in CM360...");
+
+  // Build payload with file data included
+  const payload = { ...currentConfig };
+  payload.creatives = state.creatives.map(c => ({
+    name: c.name, fileName: c.fileName,
+    width: parseInt(c.width), height: parseInt(c.height),
+    fileData: c.fileData, mimeType: c.mimeType,
+  }));
+
+  try {
+    const res = await fetch(SERVER + "/execute", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await res.json();
+    renderExecResults(result);
+
+    if (result.success) {
+      addLog(`Campaign created! ID: ${result.summary?.campaign_id}`);
+      setStatus("done", "Executed ✓");
+    } else {
+      addLog(`Failed: ${result.error?.message}`, true);
+      setStatus("error", "Error");
+    }
+  } catch (err) {
+    addLog("Server error: " + err.message, true);
+    setStatus("error", "Error");
+  }
+  btn.disabled = false; btn.textContent = "⚡ Execute in CM360";
+}
+
+function renderExecResults(result) {
+  const el = document.getElementById("execResults");
+  let html = `<div style="margin-top:14px"><label style="margin-bottom:8px;color:${result.success?'#22c55e':'#ef4444'}">${result.success ? '✓ EXECUTION COMPLETE' : '✗ EXECUTION FAILED'}</label>`;
+
+  if (result.summary) {
+    html += `<div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:8px;padding:12px;margin-bottom:10px;font-size:12px"><div style="font-weight:600;margin-bottom:4px;color:#22c55e">${result.summary.message}</div><div style="font-family:'JetBrains Mono';font-size:10px;color:#6b7280">Campaign ID: ${result.summary.campaign_id} · Creatives: ${result.summary.creatives_uploaded || 0} · Placements: ${result.summary.placements_created} · Ads: ${result.summary.ads_created || 0}</div></div>`;
+  }
+  if (result.error) {
+    html += `<div style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:12px;margin-bottom:10px;font-size:12px;color:#f87171">${result.error.message}</div>`;
+  }
+
+  if (result.steps) {
+    html += result.steps.map(s => {
+      const icon = s.status === "success" ? "success" : s.status === "skipped" ? "skipped" : "error";
+      const sym = s.status === "success" ? "✓" : s.status === "skipped" ? "—" : "✗";
+      return `<div class="exec-step"><span class="exec-icon ${icon}">${sym}</span><div style="flex:1"><span style="font-family:'JetBrains Mono';color:#7b5ea7">${s.action}</span> <span style="color:#6b7280">${s.result?.message||s.result?.name||''}</span></div></div>`;
+    }).join("");
+  }
+
+  html += "</div>";
+  el.innerHTML = html;
+}
+
+// ── Mode switching ──
+function setMode(mode) {
+  document.getElementById("builderMode").style.display = mode === "builder" ? "block" : "none";
+  document.getElementById("reportMode").style.display = mode === "report" ? "block" : "none";
+  document.getElementById("modeBuilderBtn").classList.toggle("selected", mode === "builder");
+  document.getElementById("modeReportBtn").classList.toggle("selected", mode === "report");
+  // Hide/show bottom bar
+  document.querySelector(".bottom-bar").style.display = mode === "builder" ? "flex" : "none";
+  // Hide right panel in report mode
+  if (mode === "report") document.getElementById("rightPanel").classList.remove("show");
+}
+
+function setQuery(q) {
+  document.getElementById("reportQuery").value = q;
+}
+
+// ── Reporting ──
+let reportHistory = [];
+
+async function askReport() {
+  const input = document.getElementById("reportQuery");
+  const query = input.value.trim();
+  if (!query) return;
+
+  const btn = document.getElementById("reportBtn");
+  btn.disabled = true; btn.textContent = "...";
+  document.getElementById("reportLoading").style.display = "block";
+  document.getElementById("reportResults").style.display = "none";
+
+  // Add to history
+  reportHistory.push({ role: "user", text: query });
+  renderReportHistory();
+  input.value = "";
+
+  try {
+    const res = await fetch(SERVER + "/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    const data = await res.json();
+    document.getElementById("reportLoading").style.display = "none";
+
+    if (data.success) {
+      reportHistory.push({
+        role: "agent",
+        interpretation: data.interpretation,
+        summary: data.summary,
+        data: data.data,
+        params: data.params,
+      });
+    } else {
+      reportHistory.push({ role: "agent", summary: "Error: " + (data.error || "Unknown error"), error: true });
+    }
+    renderReportHistory();
+  } catch (err) {
+    document.getElementById("reportLoading").style.display = "none";
+    reportHistory.push({ role: "agent", summary: "Server error: " + err.message, error: true });
+    renderReportHistory();
+  }
+
+  btn.disabled = false; btn.textContent = "Ask";
+}
+
+function renderReportHistory() {
+  const el = document.getElementById("reportHistory");
+  el.innerHTML = reportHistory.map((msg, idx) => {
+    if (msg.role === "user") {
+      return `<div style="margin-bottom:12px;display:flex;justify-content:flex-end">
+        <div style="background:#4f6df5;color:white;padding:10px 16px;border-radius:12px 12px 2px 12px;max-width:80%;font-size:14px">${msg.text}</div>
+      </div>`;
+    } else {
+      let html = `<div style="margin-bottom:16px">`;
+      if (msg.interpretation) {
+        html += `<div style="font-family:'JetBrains Mono';font-size:10px;color:#9ca3af;margin-bottom:6px">${msg.interpretation} · ${msg.params?.start_date} to ${msg.params?.end_date}</div>`;
+      }
+      html += `<div style="background:#ffffff;border:1px solid #e0e2e8;padding:14px 18px;border-radius:2px 12px 12px 12px;font-size:14px;line-height:1.6;color:${msg.error ? '#dc2626' : '#333'};box-shadow:0 1px 3px rgba(0,0,0,0.04)">${msg.summary}</div>`;
+
+      // Data table
+      if (msg.data?.rows?.length) {
+        html += `<div style="margin-top:8px;overflow-x:auto;border:1px solid #e0e2e8;border-radius:8px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'JetBrains Mono'">
+            <thead><tr>${msg.data.headers.map(h => `<th style="text-align:left;padding:8px 10px;background:#f8f9fb;border-bottom:1px solid #e0e2e8;color:#6b7280;font-size:10px;text-transform:uppercase;white-space:nowrap">${h}</th>`).join("")}</tr></thead>
+            <tbody>${msg.data.rows.slice(0, 20).map(row => `<tr>${msg.data.headers.map(h => `<td style="padding:6px 10px;border-bottom:1px solid #f0f1f4;white-space:nowrap">${row[h] || "-"}</td>`).join("")}</tr>`).join("")}</tbody>
+          </table>
+        </div>`;
+        if (msg.data.rows.length > 20) {
+          html += `<div style="font-family:'JetBrains Mono';font-size:10px;color:#9ca3af;margin-top:4px">Showing 20 of ${msg.data.rows.length} rows</div>`;
+        }
+      }
+      html += "</div>";
+      return html;
+    }
+  }).join("");
+  el.scrollTop = el.scrollHeight;
+}
+
+// Init
+renderCountries();
+</script>
+</body>
+</html>
