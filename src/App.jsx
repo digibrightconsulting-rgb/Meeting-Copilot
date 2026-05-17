@@ -233,18 +233,11 @@ function Onboarding({ onComplete }) {
     transition: "all 0.15s",
   });
 
-  // Progress bar
-  const Progress = () => (
+  const Progress = ({ step, total }) => (
     <div style={{ display: "flex", gap: 6, marginBottom: 32 }}>
-      {Array.from({ length: totalSteps }).map((_, i) => (
+      {Array.from({ length: total }).map((_, i) => (
         <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? "#16a34a" : "#e5e7eb", transition: "background 0.3s" }} />
       ))}
-    </div>
-  );
-
-  const Card = ({ children }) => (
-    <div style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
-      {children}
     </div>
   );
 
@@ -279,8 +272,8 @@ function Onboarding({ onComplete }) {
 
         {/* Step 0 — Welcome */}
         {step === 0 && (
-          <Card>
-            <Progress />
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ width: 64, height: 64, background: "#16a34a", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 16px rgba(22,163,74,0.3)" }}>⚡</div>
               <h1 style={{ margin: "0 0 10px", fontSize: 26, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em" }}>Welcome to Meeting Co‑Pilot</h1>
@@ -300,26 +293,26 @@ function Onboarding({ onComplete }) {
               ))}
             </div>
             <NavButtons nextLabel="Get Started →" disabled={false} />
-          </Card>
+          </div>
         )}
 
         {/* Step 1 — Name & Role */}
         {step === 1 && (
-          <Card>
-            <Progress />
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>Tell us about yourself</h2>
             <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>This helps personalise your talking points to your role and expertise.</p>
             <Field label="Your Name *" value={profile.name} onChange={v => update("name", v)} placeholder="e.g. Shad" />
             <Field label="Your Job Title / Role *" value={profile.role} onChange={v => update("role", v)} placeholder="e.g. Paid Media & Marketing Measurement Analyst" />
             <Field label="Preferred Tone" value={profile.tone} onChange={v => update("tone", v)} placeholder="e.g. Confident, data-backed, strategic" />
             <NavButtons />
-          </Card>
+          </div>
         )}
 
         {/* Step 2 — Expertise */}
         {step === 2 && (
-          <Card>
-            <Progress />
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>Your areas of expertise</h2>
             <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>Select all that apply — the more you add, the sharper your suggestions.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
@@ -343,13 +336,13 @@ function Onboarding({ onComplete }) {
               <p style={{ margin: "10px 0 0", fontSize: 12, color: "#16a34a", fontFamily: "monospace" }}>✓ {profile.expertise.length} skill{profile.expertise.length !== 1 ? "s" : ""} selected</p>
             )}
             <NavButtons />
-          </Card>
+          </div>
         )}
 
         {/* Step 3 — Meeting Type */}
         {step === 3 && (
-          <Card>
-            <Progress />
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What type of meetings do you mostly attend?</h2>
             <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>This sets the default context for your suggestions.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
@@ -360,13 +353,13 @@ function Onboarding({ onComplete }) {
               ))}
             </div>
             <NavButtons disabled={false} />
-          </Card>
+          </div>
         )}
 
         {/* Step 4 — Language */}
         {step === 4 && (
-          <Card>
-            <Progress />
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
             <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>Co-Pilot will listen in this language and always give suggestions in English.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 8 }}>
@@ -381,13 +374,13 @@ function Onboarding({ onComplete }) {
               ))}
             </div>
             <NavButtons disabled={false} />
-          </Card>
+          </div>
         )}
 
         {/* Step 5 — Tutorial */}
         {step === 5 && (
-          <Card>
-            <Progress />
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>How it works</h2>
             <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 13 }}>A quick guide before you jump in.</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 8 }}>
@@ -407,7 +400,7 @@ function Onboarding({ onComplete }) {
               ))}
             </div>
             <NavButtons nextLabel="Let's go! ⚡" onNext={finish} disabled={false} />
-          </Card>
+          </div>
         )}
       </div>
     </div>
