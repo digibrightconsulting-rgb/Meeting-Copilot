@@ -171,13 +171,14 @@ function SuggestionCard({ item, index, showNote }) {
 }
 
 function Field({ label, value, onChange, placeholder, multiline, rows = 3 }) {
+  const [local, setLocal] = useState(value);
   const base = { width: "100%", background: "white", border: "1px solid #d1d5db", borderRadius: 8, color: "#1f2937", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'DM Sans', sans-serif", marginTop: 5 };
   return (
     <div style={{ marginBottom: 15 }}>
       <label style={{ fontSize: 11, color: "#6b7280", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</label>
       {multiline
-        ? <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows} style={{ ...base, resize: "vertical" }} />
-        : <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={base} />}
+        ? <textarea value={local} onChange={e => setLocal(e.target.value)} onBlur={() => onChange(local)} placeholder={placeholder} rows={rows} style={{ ...base, resize: "vertical" }} />
+        : <input value={local} onChange={e => setLocal(e.target.value)} onBlur={() => onChange(local)} placeholder={placeholder} style={base} />}
     </div>
   );
 }
