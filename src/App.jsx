@@ -135,6 +135,46 @@ Respond ONLY with a JSON array, no markdown, no preamble:
 ]`;
 }
 
+function buildSummaryPrompt(profile, transcript, goal, prepTopic, prepAttendees) {
+  const fullText = transcript.map(t => t.text).join(" ");
+  return `You are debriefing a ${profile.role} after a meeting. Analyse the transcript and produce a structured post-meeting summary tailored to their profile.
+
+PROFESSIONAL PROFILE:
+Name: ${profile.name}
+Role: ${profile.role}
+Expertise: ${profile.expertise.join(", ")}
+Tone: ${profile.tone}
+
+MEETING CONTEXT:
+Topic: ${prepTopic || "Not specified"}
+Attendees: ${prepAttendees || "Not specified"}
+Goal: ${goal || "Not specified"}
+
+FULL MEETING TRANSCRIPT:
+"${fullText}"
+
+Produce a structured debrief. Respond ONLY with a JSON object, no markdown, no preamble:
+{
+  "summary": [
+    { "point": "Key topic or decision discussed..." },
+    { "point": "..." }
+  ],
+  "your_contribution": [
+    { "type": "Strength", "text": "Something they handled well or could have said..." },
+    { "type": "Missed Opportunity", "text": "A moment they could have added more value..." }
+  ],
+  "lessons": [
+    { "title": "Lesson title", "text": "Actionable takeaway for next time, grounded in their expertise..." },
+    { "title": "...", "text": "..." }
+  ],
+  "next_meeting_prep": [
+    { "action": "Specific thing to research, prepare, or bring to the next similar meeting..." },
+    { "action": "..." }
+  ]
+}`;
+}
+
+
 // ── Card styles ────────────────────────────────────────────────────────────
 const TYPE_STYLES = {
   "Talking Point":         { border: "#16a34a", bg: "#f0fdf4", badge: "#dcfce7", badgeText: "#15803d" },
@@ -460,6 +500,9 @@ function MeetingApp({ profile, onEditProfile }) {
   const [lastUpdated, setLastUpdated]         = useState(null);
   const [manualText, setManualText]           = useState("");
   const [liveError, setLiveError]             = useState("");
+  const [summary, setSummary]               = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError]     = useState("");
 
   const recognitionRef = useRef(null);
   const transcriptRef  = useRef([]);
@@ -532,6 +575,16 @@ function MeetingApp({ profile, onEditProfile }) {
 
   const clearSession = () => { setTranscript([]); setLiveSuggestions([]); setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
 
+  const generateSummary = async () => {
+    if (transcript.length === 0) { setSummaryError("No transcript yet — run a live session first."); return; }
+    setSummaryLoading(true); setSummaryError("");
+    try {
+      const raw = await callClaude(buildSummaryPrompt(profile, transcript, sessionGoal, prepTopic, prepAttendees));
+      setSummary(JSON.parse(raw));
+    } catch (e) { setSummaryError("Error generating summary. Try again."); console.error(e); }
+    setSummaryLoading(false);
+  };
+
   const statusInfo = { idle: { color: "#9ca3af", label: "Ready" }, listening: { color: "#16a34a", label: "Listening" }, thinking: { color: "#d97706", label: "Analysing…" }, error: { color: "#dc2626", label: "Error" } };
 
   return (
@@ -563,7 +616,7 @@ function MeetingApp({ profile, onEditProfile }) {
         </div>
 
         <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 9, padding: 3, border: "1px solid #e5e7eb", gap: 2 }}>
-          {[{ key: "prep", label: "⚙  Prep" }, { key: "live", label: "●  Live" }].map(({ key, label }) => (
+          {[{ key: "prep", label: "⚙  Prep" }, { key: "live", label: "●  Live" }, { key: "summary", label: "📋  Summary" }].map(({ key, label }) => (
             <button key={key} onClick={() => setMode(key)} style={{ background: mode === key ? "white" : "transparent", border: "none", boxShadow: mode === key ? "0 1px 3px rgba(0,0,0,0.1)" : "none", color: mode === key ? "#111827" : "#6b7280", borderRadius: 7, padding: "6px 18px", fontSize: 12, fontWeight: mode === key ? 600 : 400 }}>{label}</button>
           ))}
         </div>
@@ -639,6 +692,137 @@ function MeetingApp({ profile, onEditProfile }) {
         </div>
       )}
 
+
+      {/* SUMMARY MODE */}
+      {mode === "summary" && (
+        <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px", maxWidth: 900, margin: "0 auto", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+            <div>
+              <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700, color: "#111827" }}>Meeting Summary</h2>
+              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>{transcript.length > 0 ? `Based on ${transcript.length} transcript segments` : "Run a live session first to generate a summary"}</p>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              {summary && (
+                <button onClick={() => {
+                  const text = [
+                    "MEETING SUMMARY",
+                    "================",
+                    "",
+                    "KEY POINTS:",
+                    ...summary.summary.map(s => `• ${s.point}`),
+                    "",
+                    "YOUR CONTRIBUTION:",
+                    ...summary.your_contribution.map(c => `[${c.type}] ${c.text}`),
+                    "",
+                    "LESSONS FOR NEXT TIME:",
+                    ...summary.lessons.map(l => `• ${l.title}: ${l.text}`),
+                    "",
+                    "PREP FOR NEXT MEETING:",
+                    ...summary.next_meeting_prep.map(n => `• ${n.action}`),
+                  ].join("\n");
+                  navigator.clipboard.writeText(text);
+                }} style={{ background: "white", border: "1px solid #d1d5db", color: "#374151", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500 }}>
+                  Copy All
+                </button>
+              )}
+              <button onClick={generateSummary} disabled={summaryLoading || transcript.length === 0} style={{ background: summaryLoading || transcript.length === 0 ? "#f3f4f6" : "#16a34a", border: "none", color: summaryLoading || transcript.length === 0 ? "#9ca3af" : "white", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8, boxShadow: summaryLoading || transcript.length === 0 ? "none" : "0 2px 8px rgba(22,163,74,0.3)" }}>
+                {summaryLoading ? <><div style={{ width: 13, height: 13, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />Generating…</> : "⚡ Generate Summary"}
+              </button>
+            </div>
+          </div>
+
+          {summaryError && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "12px 16px", marginBottom: 20, color: "#dc2626", fontSize: 13 }}>⚠ {summaryError}</div>}
+
+          {!summary && !summaryLoading && (
+            <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: "48px 32px", textAlign: "center", color: "#9ca3af" }}>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>📋</div>
+              <p style={{ margin: "0 0 6px", fontSize: 15, fontWeight: 600, color: "#374151" }}>No summary yet</p>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>{transcript.length > 0 ? "Click Generate Summary to get your post-meeting debrief." : "Complete a live session first, then come back here."}</p>
+            </div>
+          )}
+
+          {summaryLoading && (
+            <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: "48px 32px", textAlign: "center" }}>
+              <div style={{ width: 28, height: 28, border: "3px solid #16a34a", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto 16px" }} />
+              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Analysing your meeting…</p>
+            </div>
+          )}
+
+          {summary && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+              {/* Meeting Summary */}
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📌</div>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>What Was Discussed</span>
+                  <span style={{ background: "#dbeafe", color: "#1d4ed8", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: "auto" }}>{summary.summary.length} points</span>
+                </div>
+                <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  {summary.summary.map((s, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#eff6ff", color: "#1d4ed8", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>{i + 1}</div>
+                      <p style={{ margin: 0, fontSize: 13.5, color: "#374151", lineHeight: 1.6 }}>{s.point}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Your Contribution */}
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎯</div>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Your Contribution</span>
+                </div>
+                <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  {summary.your_contribution.map((c, i) => {
+                    const isStrength = c.type === "Strength";
+                    return (
+                      <div key={i} style={{ background: isStrength ? "#f0fdf4" : "#fffbeb", border: `1px solid ${isStrength ? "#86efac" : "#fde68a"}`, borderLeft: `4px solid ${isStrength ? "#16a34a" : "#d97706"}`, borderRadius: 10, padding: "12px 14px" }}>
+                        <span style={{ background: isStrength ? "#dcfce7" : "#fef3c7", color: isStrength ? "#15803d" : "#b45309", fontSize: 10, fontWeight: 700, fontFamily: "monospace", textTransform: "uppercase", padding: "2px 8px", borderRadius: 4, letterSpacing: "0.07em" }}>{c.type}</span>
+                        <p style={{ margin: "8px 0 0", fontSize: 13.5, color: "#374151", lineHeight: 1.6 }}>{c.text}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Lessons */}
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: "#f5f3ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>💡</div>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Lessons for Next Time</span>
+                </div>
+                <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+                  {summary.lessons.map((l, i) => (
+                    <div key={i} style={{ borderLeft: "4px solid #7c3aed", background: "#f5f3ff", borderRadius: "0 10px 10px 0", padding: "12px 14px" }}>
+                      <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 13, color: "#5b21b6" }}>{l.title}</p>
+                      <p style={{ margin: 0, fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{l.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Next Meeting Prep */}
+              <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 32 }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🚀</div>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Prep for Next Meeting</span>
+                </div>
+                <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  {summary.next_meeting_prep.map((n, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#d97706", flexShrink: 0, marginTop: 6 }} />
+                      <p style={{ margin: 0, fontSize: 13.5, color: "#374151", lineHeight: 1.6 }}>{n.action}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          )}
+        </div>
+      )}
       {/* LIVE MODE */}
       {mode === "live" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
