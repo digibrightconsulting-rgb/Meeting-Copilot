@@ -23,23 +23,90 @@ const MEETING_TYPES = [
   "Board meeting",
 ];
 
-const SUGGESTED_SKILLS = [
-  "Incrementality testing & measurement",
-  "Media Mix Modelling (MMM)",
-  "Multi-touch attribution",
-  "Paid media strategy (Meta, Google)",
-  "Programmatic advertising",
-  "Campaign performance analysis",
-  "Marketing ROI & budget optimisation",
-  "A/B testing & experimentation",
-  "Data-driven decision making",
-  "Stakeholder communication",
-  "Brand strategy",
-  "SEO / SEM",
-  "CRM & lifecycle marketing",
-  "Content marketing",
-  "Social media strategy",
+const ROLE_PACKS = [
+  {
+    id: "cmo",
+    label: "CMO / Marketing Leader",
+    icon: "📣",
+    skills: [
+      "Brand strategy", "Paid media strategy (Meta, Google)", "Campaign performance analysis",
+      "Marketing ROI & budget optimisation", "Stakeholder communication", "Media Mix Modelling (MMM)",
+      "Content marketing", "Social media strategy", "Go-to-market strategy", "Team leadership",
+    ],
+  },
+  {
+    id: "sales",
+    label: "Sales Manager",
+    icon: "🤝",
+    skills: [
+      "Objection handling", "Pipeline management", "Negotiation & closing",
+      "CRM & lifecycle marketing", "Revenue forecasting", "Client relationship management",
+      "Presentation & pitching", "Competitive positioning", "Upselling & cross-selling", "Sales strategy",
+    ],
+  },
+  {
+    id: "data",
+    label: "Data / Analytics",
+    icon: "📊",
+    skills: [
+      "Data-driven decision making", "A/B testing & experimentation", "Incrementality testing & measurement",
+      "Media Mix Modelling (MMM)", "Multi-touch attribution", "Campaign performance analysis",
+      "Statistical modelling", "Dashboard & reporting", "Programmatic advertising", "Marketing ROI & budget optimisation",
+    ],
+  },
+  {
+    id: "product",
+    label: "Product Manager",
+    icon: "🚀",
+    skills: [
+      "Product roadmap planning", "Stakeholder management", "User research & discovery",
+      "Agile & sprint planning", "Prioritisation frameworks", "Go-to-market strategy",
+      "Data-driven decision making", "Cross-functional collaboration", "OKR setting", "Presentation & pitching",
+    ],
+  },
+  {
+    id: "finance",
+    label: "Finance / CFO",
+    icon: "💰",
+    skills: [
+      "Budget planning & forecasting", "Financial modelling", "ROI & payback analysis",
+      "Risk management", "Cost optimisation", "Stakeholder communication",
+      "P&L management", "Investment appraisal", "Compliance & governance", "Strategic planning",
+    ],
+  },
+  {
+    id: "consultant",
+    label: "Consultant",
+    icon: "🏗️",
+    skills: [
+      "Client relationship management", "Problem solving & frameworks", "Presentation & pitching",
+      "Strategic planning", "Stakeholder communication", "Workshop facilitation",
+      "Change management", "Data analysis", "Project management", "Executive communication",
+    ],
+  },
+  {
+    id: "hr",
+    label: "HR / People",
+    icon: "👥",
+    skills: [
+      "Talent acquisition", "Performance management", "Employee engagement",
+      "Culture & values", "Learning & development", "Stakeholder communication",
+      "Conflict resolution", "Diversity & inclusion", "Compensation & benefits", "Organisational design",
+    ],
+  },
+  {
+    id: "other",
+    label: "Other / General",
+    icon: "✨",
+    skills: [
+      "Stakeholder communication", "Project management", "Presentation & pitching",
+      "Strategic planning", "Leadership & team management", "Problem solving",
+      "Data-driven decision making", "Negotiation", "Change management", "Executive communication",
+    ],
+  },
 ];
+
+const ALL_SKILLS = [...new Set(ROLE_PACKS.flatMap(r => r.skills))].sort();
 
 const DEFAULT_PROFILE = {
   name: "",
@@ -230,8 +297,9 @@ function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [customSkill, setCustomSkill] = useState("");
+  const [selectedRole, setSelectedRole] = useState(null);
 
-  const totalSteps = 6;
+  const totalSteps = 7;
 
   const update = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
@@ -250,6 +318,11 @@ function Onboarding({ onComplete }) {
       setProfile(p => ({ ...p, expertise: [...p.expertise, customSkill.trim()] }));
     }
     setCustomSkill("");
+  };
+
+  const selectRolePack = (pack) => {
+    setSelectedRole(pack.id);
+    setProfile(p => ({ ...p, expertise: [...pack.skills] }));
   };
 
   const canNext = () => {
@@ -349,14 +422,47 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 2 — Expertise */}
+        {/* Step 2 — Role Type */}
         {step === 2 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
+            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What best describes your role?</h2>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>We'll pre-load the most relevant skills for your role — you can customise them in the next step.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
+              {ROLE_PACKS.map(pack => (
+                <button key={pack.id} onClick={() => selectRolePack(pack)} style={{
+                  background: selectedRole === pack.id ? "#f0fdf4" : "#f9fafb",
+                  color: selectedRole === pack.id ? "#15803d" : "#374151",
+                  border: selectedRole === pack.id ? "2px solid #16a34a" : "2px solid #e5e7eb",
+                  borderRadius: 12, padding: "14px 16px", fontSize: 13,
+                  fontFamily: "'DM Sans', sans-serif",
+                  fontWeight: selectedRole === pack.id ? 700 : 500,
+                  display: "flex", alignItems: "center", gap: 10,
+                  textAlign: "left", transition: "all 0.15s",
+                }}>
+                  <span style={{ fontSize: 20 }}>{pack.icon}</span>
+                  <span>{pack.label}</span>
+                  {selectedRole === pack.id && <span style={{ marginLeft: "auto", color: "#16a34a" }}>✓</span>}
+                </button>
+              ))}
+            </div>
+            {selectedRole && (
+              <p style={{ margin: "10px 0 0", fontSize: 12, color: "#16a34a", fontFamily: "monospace" }}>
+                ✓ {ROLE_PACKS.find(r => r.id === selectedRole)?.skills.length} skills pre-loaded — customise them next
+              </p>
+            )}
+            <NavButtons disabled={!selectedRole} />
+          </div>
+        )}
+
+        {/* Step 3 — Expertise */}
+        {step === 3 && (
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>Your areas of expertise</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>Select all that apply — the more you add, the sharper your suggestions.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>We've pre-selected skills based on your role — add or remove anything to match your expertise.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-              {SUGGESTED_SKILLS.map(skill => (
+              {ALL_SKILLS.map(skill => (
                 <button key={skill} onClick={() => toggleSkill(skill)} style={{
                   background: profile.expertise.includes(skill) ? "#dcfce7" : "#f9fafb",
                   color: profile.expertise.includes(skill) ? "#15803d" : "#374151",
@@ -379,8 +485,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 3 — Meeting Type */}
-        {step === 3 && (
+        {/* Step 4 — Meeting Type */}
+        {step === 4 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What type of meetings do you mostly attend?</h2>
@@ -396,8 +502,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 4 — Language */}
-        {step === 4 && (
+        {/* Step 5 — Language */}
+        {step === 5 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
@@ -417,8 +523,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 5 — Tutorial */}
-        {step === 5 && (
+        {/* Step 6 — Tutorial */}
+        {step === 6 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>How it works</h2>
