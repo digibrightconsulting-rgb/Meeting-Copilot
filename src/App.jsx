@@ -858,10 +858,7 @@ function MeetingApp({ profile, onEditProfile }) {
         {mode === "live" && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={clearSession} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Clear</button>
-            <button onClick={() => setShowChat(c => !c)} style={{ background: showChat ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "white", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: showChat ? 600 : 400 }}>
-              💬 Ask AI
-            </button>
-            <button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#FEE2E2" : "#EDE9FE", border: `1px solid ${isListening ? "#FCA5A5" : "#C4B5FD"}`, color: isListening ? "#DC2626" : "#6D28D9", borderRadius: 8, padding: "5px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+<button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#FEE2E2" : "#EDE9FE", border: `1px solid ${isListening ? "#FCA5A5" : "#C4B5FD"}`, color: isListening ? "#DC2626" : "#6D28D9", borderRadius: 8, padding: "5px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
               <div style={{ width: isListening ? 8 : 9, height: isListening ? 8 : 9, borderRadius: isListening ? 2 : "50%", background: isListening ? "#DC2626" : "#6D28D9", animation: isListening ? "pulse 1.2s infinite" : "none" }} />
               {isListening ? "End Meeting" : "Start Listening"}
             </button>
@@ -1102,22 +1099,31 @@ function MeetingApp({ profile, onEditProfile }) {
             </div>
           </div>
 
-          <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0, height: 95 }}>
-            <div style={{ display: "flex", height: "100%" }}>
-              <div style={{ padding: "7px 12px", borderRight: "1px solid #DDD6FE", display: "flex", alignItems: "center", flexShrink: 0 }}>
-                <span style={{ fontSize: 10, color: "#7C3AED", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", writingMode: "vertical-rl", transform: "rotate(180deg)", fontWeight: 700 }}>Transcript</span>
+          {/* Ask AI Bottom Bar */}
+          <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0 }}>
+            {chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "ai" && (
+              <div style={{ padding: "10px 22px", background: "#F5F3FF", borderBottom: "1px solid #DDD6FE", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#3B0764", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "white", fontWeight: 700, flexShrink: 0, marginTop: 1 }}>U</div>
+                <p style={{ margin: 0, fontSize: 13, color: "#1E1033", lineHeight: 1.55, fontFamily: "'Georgia', serif", flex: 1 }}>
+                  {chatHistory[chatHistory.length - 1].text}
+                </p>
               </div>
-              <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 16px", borderRight: "1px solid #DDD6FE" }}>
-                {transcript.length === 0 ? <span style={{ color: "#d1d5db", fontSize: 12, fontStyle: "italic" }}>Live transcript will appear here as people speak…</span> : transcript.map((t, i) => (
-                  <span key={t.id} style={{ color: "#374151", fontSize: 12 }}>
-                    <span style={{ color: "#d1d5db", fontFamily: "monospace", fontSize: 10, marginRight: 5 }}>{String(i + 1).padStart(2, "0")}</span>{t.text}{" "}
-                  </span>
-                ))}
+            )}
+            <div style={{ padding: "10px 22px", display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#6D28D9" }} />
+                <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Ask AI</span>
               </div>
-              <div style={{ width: 280, display: "flex", gap: 8, padding: "10px 14px", alignItems: "flex-end" }}>
-                <textarea value={manualText} onChange={e => setManualText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addManual(); } }} placeholder="Type / paste what was just said…" rows={3} style={{ flex: 1, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 10px", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "none" }} />
-                <button onClick={addManual} style={{ background: "#6D28D9", border: "none", color: "white", borderRadius: 8, padding: "7px 13px", fontSize: 12, fontWeight: 600, alignSelf: "flex-end", boxShadow: "0 1px 4px rgba(109,40,217,0.3)" }}>Add</button>
-              </div>
+              <input
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") sendChat(); }}
+                placeholder="Ask anything — e.g. How should I respond to that objection?"
+                style={{ flex: 1, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 9, color: "#1E1033", padding: "9px 14px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none" }}
+              />
+              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()} style={{ background: "#6D28D9", border: "none", color: "white", borderRadius: 9, padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: chatLoading || !chatInput.trim() ? 0.45 : 1, display: "flex", alignItems: "center", gap: 6, boxShadow: "0 2px 8px rgba(109,40,217,0.25)" }}>
+                {chatLoading ? <div style={{ width: 13, height: 13, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /> : "Send →"}
+              </button>
             </div>
           </div>
         </div>
