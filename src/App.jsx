@@ -605,6 +605,10 @@ function MeetingApp({ profile, onEditProfile }) {
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [sessionConsentGiven, setSessionConsentGiven] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
 
   const [prepTopic, setPrepTopic]       = useState("");
   const [prepAttendees, setPrepAttendees] = useState("");
@@ -614,6 +618,10 @@ function MeetingApp({ profile, onEditProfile }) {
   const [prepPoints, setPrepPoints]     = useState([]);
   const [prepLoading, setPrepLoading]   = useState(false);
   const [prepError, setPrepError]       = useState("");
+  const [savedMeetings, setSavedMeetings] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("unmute_saved_meetings") || "[]"); } catch { return []; }
+  });
+  const [showPlanner, setShowPlanner]   = useState(false);
 
   const [sessionGoal, setSessionGoal]         = useState("");
   const [isListening, setIsListening]         = useState(false);
@@ -720,6 +728,64 @@ function MeetingApp({ profile, onEditProfile }) {
 
   const clearSession = () => { setTranscript([]); setLiveSuggestions([]); setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
 
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const userMsg = chatInput.trim();
+    setChatInput("");
+    setChatHistory(prev => [...prev, { role: "user", text: userMsg }]);
+    setChatLoading(true);
+    try {
+      const recentTranscript = transcriptRef.current.slice(-10).map(t => t.text).join(" ");
+      const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("
+");
+      const prompt = `You are a real-time AI assistant supporting a ${profile.role} during a meeting.
+Professional expertise: ${profile.expertise.join(", ")}
+Session goal: ${sessionGoal || "Not specified"}
+Recent meeting transcript: "${recentTranscript || "No transcript yet"}"
+${historyText ? `Chat history:
+${historyText}` : ""}
+
+User question: ${userMsg}
+
+Give a concise, direct, expert answer in 1-3 sentences. Ground it in their professional expertise where relevant. No preamble.`;
+      const raw = await callClaude(prompt);
+      const cleanResponse = raw.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').trim();
+      setChatHistory(prev => [...prev, { role: "ai", text: cleanResponse }]);
+    } catch (e) {
+      console.error(e);
+      setChatHistory(prev => [...prev, { role: "ai", text: "Sorry, couldn't get a response. Try again." }]);
+    }
+    setChatLoading(false);
+  };
+
+  const saveMeeting = () => {
+    if (!prepTopic.trim()) return;
+    const meeting = {
+      id: Date.now(),
+      savedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
+      topic: prepTopic, attendees: prepAttendees, goal: prepGoal,
+      concerns: prepConcerns, data: prepData,
+    };
+    const updated = [meeting, ...savedMeetings].slice(0, 10);
+    setSavedMeetings(updated);
+    localStorage.setItem("unmute_saved_meetings", JSON.stringify(updated));
+  };
+
+  const loadMeeting = (meeting) => {
+    setPrepTopic(meeting.topic);
+    setPrepAttendees(meeting.attendees);
+    setPrepGoal(meeting.goal);
+    setPrepConcerns(meeting.concerns);
+    setPrepData(meeting.data);
+    setShowPlanner(false);
+  };
+
+  const deleteMeeting = (id) => {
+    const updated = savedMeetings.filter(m => m.id !== id);
+    setSavedMeetings(updated);
+    localStorage.setItem("unmute_saved_meetings", JSON.stringify(updated));
+  };
+
   const generateSummary = async () => {
     if (transcript.length === 0) { setSummaryError("No transcript yet — run a live session first."); return; }
     setSummaryLoading(true); setSummaryError("");
@@ -733,57 +799,60 @@ function MeetingApp({ profile, onEditProfile }) {
   const statusInfo = { idle: { color: "#9ca3af", label: "Ready" }, listening: { color: "#16a34a", label: "Listening" }, thinking: { color: "#d97706", label: "Analysing…" }, error: { color: "#dc2626", label: "Error" } };
 
   return (
-    <div style={{ height: "100vh", background: "#f9fafb", fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", color: "#111827", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ height: "100vh", background: "#F5F3FF", fontFamily: "'Plus Jakarta Sans', 'Helvetica Neue', sans-serif", color: "#1E1033", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;0,9..144,900;1,9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
         @keyframes slideIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
         @keyframes spin{to{transform:rotate(360deg)}}
         *{box-sizing:border-box}
         ::-webkit-scrollbar{width:4px}
         ::-webkit-scrollbar-track{background:#f3f4f6}
-        ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
+        ::-webkit-scrollbar-thumb{background:#C4B5FD;border-radius:2px}
         input,textarea{outline:none}
         button{cursor:pointer;transition:all .15s}
         button:hover{opacity:.85}
         textarea{resize:vertical}
-        input::placeholder,textarea::placeholder{color:#9ca3af}
+        input::placeholder,textarea::placeholder{color:#9B8FC0}
       `}</style>
 
       {/* Header */}
-      <div style={{ background: "white", borderBottom: "1px solid #e5e7eb", padding: "11px 22px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 8 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, boxShadow: "0 2px 6px rgba(22,163,74,0.3)" }}>⚡</div>
+      <div style={{ background: "#3B0764", padding: "0 22px", height: 56, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 6 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: "#7C3AED", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, color: "white" }}>U</div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.02em", color: "#111827", lineHeight: 1.2 }}>Meeting Co‑Pilot</div>
-            <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace" }}>{profile.name} · {profile.role}</div>
+            <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, fontSize: 16, color: "white", letterSpacing: "-0.01em", lineHeight: 1.2 }}>Unmute</div>
+            <div style={{ fontSize: 10, color: "rgba(196,181,253,0.8)" }}>{profile.name} · {profile.role}</div>
           </div>
         </div>
 
-        <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 9, padding: 3, border: "1px solid #e5e7eb", gap: 2 }}>
-          {[{ key: "prep", label: "⚙  Prep" }, { key: "live", label: "●  Live" }, { key: "summary", label: "📋  Summary" }].map(({ key, label }) => (
-            <button key={key} onClick={() => setMode(key)} style={{ background: mode === key ? "white" : "transparent", border: "none", boxShadow: mode === key ? "0 1px 3px rgba(0,0,0,0.1)" : "none", color: mode === key ? "#111827" : "#6b7280", borderRadius: 7, padding: "6px 18px", fontSize: 12, fontWeight: mode === key ? 600 : 400 }}>{label}</button>
+        {/* Mode tabs */}
+        <div style={{ display: "flex", background: "rgba(255,255,255,0.1)", borderRadius: 9, padding: 3, gap: 2 }}>
+          {[{ key: "prep", label: "Prep" }, { key: "live", label: "Live" }, { key: "summary", label: "Summary" }].map(({ key, label }) => (
+            <button key={key} onClick={() => setMode(key)} style={{ background: mode === key ? "rgba(255,255,255,0.18)" : "transparent", border: "none", color: mode === key ? "white" : "rgba(196,181,253,0.7)", borderRadius: 7, padding: "6px 16px", fontSize: 12, fontWeight: mode === key ? 600 : 400, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{label}</button>
           ))}
         </div>
 
+        {/* Live status */}
         {mode === "live" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 20, padding: "4px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.1)", borderRadius: 20, padding: "4px 12px" }}>
             <div style={{ width: 7, height: 7, borderRadius: "50%", background: statusInfo[liveStatus].color, animation: ["listening","thinking"].includes(liveStatus) ? `pulse ${liveStatus === "thinking" ? "0.6s" : "2s"} infinite` : "none" }} />
-            <span style={{ fontSize: 12, color: "#374151", fontWeight: 500 }}>{statusInfo[liveStatus].label}</span>
-            {lastUpdated && <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace", marginLeft: 2 }}>· {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.9)", fontWeight: 500 }}>{statusInfo[liveStatus].label}</span>
+            {lastUpdated && <span style={{ fontSize: 10, color: "rgba(196,181,253,0.6)", marginLeft: 2 }}>· {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
           </div>
         )}
 
         {/* Language */}
         <div style={{ marginLeft: "auto", position: "relative" }}>
-          <button onClick={() => setShowLangMenu(p => !p)} style={{ background: "white", border: "1px solid #d1d5db", color: "#374151", borderRadius: 8, padding: "6px 13px", fontSize: 12, display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
-            <span>{language.flag}</span><span style={{ fontFamily: "monospace", fontWeight: 500 }}>{language.label}</span><span style={{ fontSize: 9, color: "#9ca3af" }}>▼</span>
+          <button onClick={() => setShowLangMenu(p => !p)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.9)", borderRadius: 8, padding: "5px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 7 }}>
+            <span>{language.flag}</span><span style={{ fontWeight: 500 }}>{language.label}</span><span style={{ fontSize: 9, color: "rgba(196,181,253,0.6)" }}>▼</span>
           </button>
           {showLangMenu && (
-            <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "white", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", zIndex: 100, minWidth: 160, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+            <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "white", border: "1px solid #DDD6FE", borderRadius: 10, overflow: "hidden", zIndex: 100, minWidth: 160, boxShadow: "0 8px 32px rgba(59,7,100,0.2)" }}>
               {LANGUAGES.map(l => (
-                <button key={l.code} onClick={() => { setLanguage(l); setShowLangMenu(false); if (isListening) stopListening(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: language.code === l.code ? "#f0fdf4" : "white", border: "none", color: language.code === l.code ? "#15803d" : "#374151", padding: "10px 15px", fontSize: 13, textAlign: "left", fontWeight: language.code === l.code ? 600 : 400 }}>
-                  <span>{l.flag}</span><span>{l.label}</span>{language.code === l.code && <span style={{ marginLeft: "auto" }}>✓</span>}
+                <button key={l.code} onClick={() => { setLanguage(l); setShowLangMenu(false); if (isListening) stopListening(); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: language.code === l.code ? "#F5F3FF" : "white", border: "none", color: language.code === l.code ? "#6D28D9" : "#374151", padding: "10px 15px", fontSize: 13, textAlign: "left", fontWeight: language.code === l.code ? 600 : 400 }}>
+                  <span>{l.flag}</span><span>{l.label}</span>{language.code === l.code && <span style={{ marginLeft: "auto", color: "#6D28D9" }}>✓</span>}
                 </button>
               ))}
             </div>
@@ -791,15 +860,19 @@ function MeetingApp({ profile, onEditProfile }) {
         </div>
 
         {/* Edit profile */}
-        <button onClick={onEditProfile} style={{ background: "white", border: "1px solid #d1d5db", color: "#6b7280", borderRadius: 8, padding: "6px 13px", fontSize: 12, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
+        <button onClick={onEditProfile} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>
           Edit Profile
         </button>
 
+        {/* Live controls */}
         {mode === "live" && (
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={clearSession} style={{ background: "white", border: "1px solid #d1d5db", color: "#6b7280", borderRadius: 8, padding: "6px 14px", fontSize: 12, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>Clear</button>
-            <button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#fef2f2" : "#f0fdf4", border: `1px solid ${isListening ? "#fca5a5" : "#86efac"}`, color: isListening ? "#dc2626" : "#16a34a", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
-              <div style={{ width: isListening ? 8 : 9, height: isListening ? 8 : 9, borderRadius: isListening ? 2 : "50%", background: isListening ? "#dc2626" : "#16a34a", animation: isListening ? "pulse 1.2s infinite" : "none" }} />
+            <button onClick={clearSession} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Clear</button>
+            <button onClick={() => setShowChat(c => !c)} style={{ background: showChat ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "white", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: showChat ? 600 : 400 }}>
+              💬 Ask AI
+            </button>
+            <button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#FEE2E2" : "#EDE9FE", border: `1px solid ${isListening ? "#FCA5A5" : "#C4B5FD"}`, color: isListening ? "#DC2626" : "#6D28D9", borderRadius: 8, padding: "5px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+              <div style={{ width: isListening ? 8 : 9, height: isListening ? 8 : 9, borderRadius: isListening ? 2 : "50%", background: isListening ? "#DC2626" : "#6D28D9", animation: isListening ? "pulse 1.2s infinite" : "none" }} />
               {isListening ? "End Meeting" : "Start Listening"}
             </button>
           </div>
@@ -809,9 +882,38 @@ function MeetingApp({ profile, onEditProfile }) {
       {/* PREP MODE */}
       {mode === "prep" && (
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "420px 1fr", overflow: "hidden" }}>
-          <div style={{ background: "white", borderRight: "1px solid #e5e7eb", overflowY: "auto", padding: "24px 26px" }}>
+          <div style={{ background: "white", borderRight: "1px solid #DDD6FE", overflowY: "auto", padding: "24px 26px" }}>
+
+            {/* Saved Meetings Planner */}
+            <div style={{ marginBottom: 20 }}>
+              <button onClick={() => setShowPlanner(p => !p)} style={{ width: "100%", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#5B21B6", fontSize: 13, fontWeight: 600 }}>
+                <span>📅</span>
+                <span>Planned Meetings</span>
+                <span style={{ marginLeft: "auto", background: "#EDE9FE", color: "#6D28D9", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>{savedMeetings.length}</span>
+                <span style={{ fontSize: 10, color: "#9B8FC0" }}>{showPlanner ? "▲" : "▼"}</span>
+              </button>
+              {showPlanner && (
+                <div style={{ border: "1px solid #DDD6FE", borderTop: "none", borderRadius: "0 0 10px 10px", overflow: "hidden" }}>
+                  {savedMeetings.length === 0 ? (
+                    <div style={{ padding: "16px 14px", textAlign: "center", color: "#C4B5FD", fontSize: 12, fontStyle: "italic" }}>
+                      No saved meetings yet — save a brief below to access it before future meetings.
+                    </div>
+                  ) : savedMeetings.map((m, i) => (
+                    <div key={m.id} style={{ padding: "10px 14px", borderBottom: i < savedMeetings.length - 1 ? "1px solid #F5F3FF" : "none", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#3B0764", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.topic}</div>
+                        <div style={{ fontSize: 11, color: "#9B8FC0", fontFamily: "monospace" }}>{m.savedAt}</div>
+                      </div>
+                      <button onClick={() => loadMeeting(m)} style={{ background: "#6D28D9", border: "none", color: "white", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>Load</button>
+                      <button onClick={() => deleteMeeting(m.id)} style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#DC2626", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div style={{ marginBottom: 22 }}>
-              <h2 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700, color: "#111827" }}>Meeting Brief Builder</h2>
+              <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Meeting Brief Builder</h2>
               <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Fill in the details and generate personalised talking points before your meeting.</p>
             </div>
             <Field label="Meeting Topic *"             value={prepTopic}     onChange={setPrepTopic}     placeholder="e.g. Q3 Marketing Budget Review" />
@@ -820,18 +922,23 @@ function MeetingApp({ profile, onEditProfile }) {
             <Field label="Expected Topics / Concerns"  value={prepConcerns}  onChange={setPrepConcerns}  placeholder="e.g. Budget cuts, ROI of measurement tools, channel performance" multiline rows={3} />
             <Field label="Data / Context to Reference" value={prepData}      onChange={setPrepData}      placeholder="e.g. MMM showed paid social drove 34% incremental revenue last quarter" multiline rows={3} />
             {prepError && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "#dc2626", fontSize: 12, fontFamily: "monospace" }}>⚠ {prepError}</div>}
-            <button onClick={generatePrep} disabled={prepLoading} style={{ width: "100%", background: "#16a34a", border: "none", color: "white", borderRadius: 10, padding: "13px", fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 9, boxShadow: "0 2px 8px rgba(22,163,74,0.3)" }}>
+            <button onClick={generatePrep} disabled={prepLoading} style={{ width: "100%", background: "#6D28D9", border: "none", color: "white", borderRadius: 10, padding: "13px", fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 9, boxShadow: "0 2px 8px rgba(109,40,217,0.3)" }}>
               {prepLoading ? <><div style={{ width: 14, height: 14, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />Generating Brief…</> : "⚡  Generate Meeting Brief"}
             </button>
-            {prepPoints.length > 0 && <button onClick={() => setMode("live")} style={{ width: "100%", marginTop: 10, background: "#eff6ff", border: "1px solid #93c5fd", color: "#1d4ed8", borderRadius: 10, padding: "12px", fontSize: 13, fontWeight: 600 }}>→ Enter Live Mode</button>}
+            {prepTopic.trim() && (
+              <button onClick={saveMeeting} style={{ width: "100%", marginTop: 10, background: "white", border: "1px solid #DDD6FE", color: "#5B21B6", borderRadius: 10, padding: "11px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                📅 Save for Later
+              </button>
+            )}
+            {prepPoints.length > 0 && <button onClick={() => setMode("live")} style={{ width: "100%", marginTop: 10, background: "#F5F3FF", border: "1px solid #C4B5FD", color: "#6D28D9", borderRadius: 10, padding: "12px", fontSize: 13, fontWeight: 600 }}>→ Enter Live Mode</button>}
           </div>
-          <div style={{ overflowY: "auto", padding: "24px 26px", background: "#f9fafb" }}>
+          <div style={{ overflowY: "auto", padding: "24px 26px", background: "#F5F3FF" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>Your Talking Points</h2>
-              {prepPoints.length > 0 && <span style={{ background: "#dcfce7", color: "#15803d", fontSize: 11, fontWeight: 700, fontFamily: "monospace", padding: "2px 9px", borderRadius: 20 }}>{prepPoints.length} cards</span>}
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Your Talking Points</h2>
+              {prepPoints.length > 0 && <span style={{ background: "#EDE9FE", color: "#6D28D9", fontSize: 11, fontWeight: 700, fontFamily: "monospace", padding: "2px 9px", borderRadius: 20 }}>{prepPoints.length} cards</span>}
             </div>
-            {prepPoints.length === 0 && !prepLoading && <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 12, padding: "32px 24px", textAlign: "center", color: "#9ca3af" }}><div style={{ fontSize: 32, marginBottom: 12 }}>📋</div><p style={{ margin: 0, fontSize: 13, lineHeight: 1.8 }}>Fill in the form and click Generate —<br />your personalised brief will appear here.</p></div>}
-            {prepLoading && <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}><div style={{ width: 24, height: 24, border: "3px solid #16a34a", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto 14px" }} /><p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Building your brief…</p></div>}
+            {prepPoints.length === 0 && !prepLoading && <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 12, padding: "32px 24px", textAlign: "center", color: "#9B8FC0" }}><div style={{ fontSize: 32, marginBottom: 12 }}>📋</div><p style={{ margin: 0, fontSize: 13, lineHeight: 1.8 }}>Fill in the form and click Generate —<br />your personalised brief will appear here.</p></div>}
+            {prepLoading && <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}><div style={{ width: 24, height: 24, border: "3px solid #6D28D9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto 14px" }} /><p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Building your brief…</p></div>}
             {prepPoints.map((p, i) => <SuggestionCard key={i} item={p} index={i} showNote={true} />)}
           </div>
         </div>
@@ -843,7 +950,7 @@ function MeetingApp({ profile, onEditProfile }) {
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px", maxWidth: 900, margin: "0 auto", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
             <div>
-              <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700, color: "#111827" }}>Meeting Summary</h2>
+              <h2 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Meeting Summary</h2>
               <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>{transcript.length > 0 ? `Based on ${transcript.length} transcript segments` : "Run a live session first to generate a summary"}</p>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
@@ -870,7 +977,7 @@ function MeetingApp({ profile, onEditProfile }) {
                   Copy All
                 </button>
               )}
-              <button onClick={generateSummary} disabled={summaryLoading || transcript.length === 0} style={{ background: summaryLoading || transcript.length === 0 ? "#f3f4f6" : "#16a34a", border: "none", color: summaryLoading || transcript.length === 0 ? "#9ca3af" : "white", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8, boxShadow: summaryLoading || transcript.length === 0 ? "none" : "0 2px 8px rgba(22,163,74,0.3)" }}>
+              <button onClick={generateSummary} disabled={summaryLoading || transcript.length === 0} style={{ background: summaryLoading || transcript.length === 0 ? "#F5F3FF" : "#6D28D9", border: "none", color: summaryLoading || transcript.length === 0 ? "#9B8FC0" : "white", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8, boxShadow: summaryLoading || transcript.length === 0 ? "none" : "0 2px 8px rgba(109,40,217,0.3)" }}>
                 {summaryLoading ? <><div style={{ width: 13, height: 13, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />Generating…</> : "⚡ Generate Summary"}
               </button>
             </div>
@@ -900,9 +1007,9 @@ function MeetingApp({ profile, onEditProfile }) {
               {/* Meeting Summary */}
               <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                 <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: 8, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📌</div>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>What Was Discussed</span>
-                  <span style={{ background: "#dbeafe", color: "#1d4ed8", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: "auto" }}>{summary.summary.length} points</span>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: "#EDE9FE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📌</div>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>What Was Discussed</span>
+                  <span style={{ background: "#EDE9FE", color: "#6D28D9", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "2px 8px", borderRadius: 10, marginLeft: "auto" }}>{summary.summary.length} points</span>
                 </div>
                 <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
                   {summary.summary.map((s, i) => (
@@ -918,7 +1025,7 @@ function MeetingApp({ profile, onEditProfile }) {
               <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                 <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎯</div>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Your Contribution</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Your Contribution</span>
                 </div>
                 <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
                   {summary.your_contribution.map((c, i) => {
@@ -937,12 +1044,12 @@ function MeetingApp({ profile, onEditProfile }) {
               <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                 <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: "#f5f3ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>💡</div>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Lessons for Next Time</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Lessons for Next Time</span>
                 </div>
                 <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
                   {summary.lessons.map((l, i) => (
-                    <div key={i} style={{ borderLeft: "4px solid #7c3aed", background: "#f5f3ff", borderRadius: "0 10px 10px 0", padding: "12px 14px" }}>
-                      <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 13, color: "#5b21b6" }}>{l.title}</p>
+                    <div key={i} style={{ borderLeft: "4px solid #6D28D9", background: "#F5F3FF", borderRadius: "0 10px 10px 0", padding: "12px 14px" }}>
+                      <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 13, color: "#4C1D95" }}>{l.title}</p>
                       <p style={{ margin: 0, fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{l.text}</p>
                     </div>
                   ))}
@@ -953,7 +1060,7 @@ function MeetingApp({ profile, onEditProfile }) {
               <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: 32 }}>
                 <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🚀</div>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#111827" }}>Prep for Next Meeting</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Prep for Next Meeting</span>
                 </div>
                 <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
                   {summary.next_meeting_prep.map((n, i) => (
@@ -972,45 +1079,45 @@ function MeetingApp({ profile, onEditProfile }) {
       {/* LIVE MODE */}
       {mode === "live" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ background: "white", borderBottom: "1px solid #e5e7eb", padding: "9px 22px", display: "flex", gap: 12, alignItems: "center", flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, whiteSpace: "nowrap" }}>Goal</span>
-            <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, color: "#111827", padding: "7px 12px", fontSize: 13, fontFamily: "'DM Sans', sans-serif" }} />
-            {language.code !== "en-US" && <div style={{ background: "#fefce8", border: "1px solid #fde68a", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#92400e", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
+          <div style={{ background: "#F5F3FF", borderBottom: "1px solid #DDD6FE", padding: "9px 22px", display: "flex", gap: 12, alignItems: "center", flexShrink: 0 }}>
+            <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" }}>Goal</span>
+            <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
+            {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
           </div>
 
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", overflow: "hidden", minHeight: 0 }}>
-            <div style={{ background: "white", borderRight: "1px solid #e5e7eb", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ background: "white", borderRight: "1px solid #DDD6FE", display: "flex", flexDirection: "column", overflow: "hidden" }}>
               <div style={{ padding: "11px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2563eb" }} />
-                <span style={{ fontSize: 11, color: "#374151", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Pre-Meeting Brief</span>
-                <span style={{ marginLeft: "auto", background: "#eff6ff", color: "#1d4ed8", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "1px 8px", borderRadius: 10 }}>{prepPoints.length} pts</span>
+                <span style={{ fontSize: 11, color: "#5B21B6", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Pre-Meeting Brief</span>
+                <span style={{ marginLeft: "auto", background: "#EDE9FE", color: "#6D28D9", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "1px 8px", borderRadius: 10 }}>{prepPoints.length} pts</span>
               </div>
               <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
-                {prepPoints.length === 0 ? <div style={{ color: "#d1d5db", fontSize: 13, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>📝</div>No brief yet —<br />go to Prep tab to generate one.</div> : prepPoints.map((p, i) => <SuggestionCard key={i} item={p} index={i} showNote={true} />)}
+                {prepPoints.length === 0 ? <div style={{ color: "#C4B5FD", fontSize: 13, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>📝</div>No brief yet —<br />go to Prep tab to generate one.</div> : prepPoints.map((p, i) => <SuggestionCard key={i} item={p} index={i} showNote={true} />)}
               </div>
             </div>
 
-            <div style={{ background: "#f9fafb", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <div style={{ background: "white", padding: "11px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div style={{ background: "#F5F3FF", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <div style={{ background: "#F5F3FF", padding: "11px 20px", borderBottom: "1px solid #DDD6FE", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", animation: isListening ? "pulse 2s infinite" : "none" }} />
-                <span style={{ fontSize: 11, color: "#374151", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Live Suggestions</span>
-                {liveStatus === "thinking" && <div style={{ width: 12, height: 12, border: "2px solid #d97706", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", marginLeft: 2 }} />}
-                <button onClick={fetchLiveSuggestions} disabled={transcript.length === 0} style={{ marginLeft: "auto", background: "#f0fdf4", border: "1px solid #86efac", color: "#16a34a", borderRadius: 7, padding: "4px 11px", fontSize: 11, fontFamily: "monospace", fontWeight: 600, opacity: transcript.length === 0 ? 0.35 : 1 }}>↻ Refresh</button>
+                <span style={{ fontSize: 11, color: "#5B21B6", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Live Suggestions</span>
+                {liveStatus === "thinking" && <div style={{ width: 12, height: 12, border: "2px solid #7C3AED", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", marginLeft: 2 }} />}
+                <button onClick={fetchLiveSuggestions} disabled={transcript.length === 0} style={{ marginLeft: "auto", background: "#EDE9FE", border: "1px solid #C4B5FD", color: "#6D28D9", borderRadius: 7, padding: "4px 11px", fontSize: 11, fontFamily: "monospace", fontWeight: 600, opacity: transcript.length === 0 ? 0.35 : 1 }}>↻ Refresh</button>
               </div>
               <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
-                {liveSuggestions.length === 0 && liveStatus !== "thinking" && <div style={{ color: "#d1d5db", fontSize: 13, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>💬</div>{transcript.length > 0 ? "Click ↻ Refresh or wait ~18s for auto-update." : "Start listening or add transcript text below."}</div>}
+                {liveSuggestions.length === 0 && liveStatus !== "thinking" && <div style={{ color: "#C4B5FD", fontSize: 13, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>💬</div>{transcript.length > 0 ? "Click ↻ Refresh or wait ~18s for auto-update." : "Start listening or add transcript text below."}</div>}
                 {liveSuggestions.map((s, i) => <SuggestionCard key={i} item={s} index={i} showNote={false} />)}
                 {liveError && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", color: "#dc2626", fontSize: 12, fontFamily: "monospace" }}>⚠ {liveError}</div>}
               </div>
             </div>
           </div>
 
-          <div style={{ background: "white", borderTop: "1px solid #e5e7eb", flexShrink: 0, height: 95 }}>
+          <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0, height: 95 }}>
             <div style={{ display: "flex", height: "100%" }}>
-              <div style={{ padding: "7px 12px", borderRight: "1px solid #f3f4f6", display: "flex", alignItems: "center", flexShrink: 0 }}>
-                <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", writingMode: "vertical-rl", transform: "rotate(180deg)", fontWeight: 600 }}>Transcript</span>
+              <div style={{ padding: "7px 12px", borderRight: "1px solid #DDD6FE", display: "flex", alignItems: "center", flexShrink: 0 }}>
+                <span style={{ fontSize: 10, color: "#7C3AED", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", writingMode: "vertical-rl", transform: "rotate(180deg)", fontWeight: 700 }}>Transcript</span>
               </div>
-              <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 16px", borderRight: "1px solid #f3f4f6" }}>
+              <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 16px", borderRight: "1px solid #DDD6FE" }}>
                 {transcript.length === 0 ? <span style={{ color: "#d1d5db", fontSize: 12, fontStyle: "italic" }}>Live transcript will appear here as people speak…</span> : transcript.map((t, i) => (
                   <span key={t.id} style={{ color: "#374151", fontSize: 12 }}>
                     <span style={{ color: "#d1d5db", fontFamily: "monospace", fontSize: 10, marginRight: 5 }}>{String(i + 1).padStart(2, "0")}</span>{t.text}{" "}
@@ -1018,8 +1125,8 @@ function MeetingApp({ profile, onEditProfile }) {
                 ))}
               </div>
               <div style={{ width: 280, display: "flex", gap: 8, padding: "10px 14px", alignItems: "flex-end" }}>
-                <textarea value={manualText} onChange={e => setManualText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addManual(); } }} placeholder="Type / paste what was just said…" rows={3} style={{ flex: 1, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, color: "#111827", padding: "7px 10px", fontSize: 12, fontFamily: "'DM Sans', sans-serif", resize: "none" }} />
-                <button onClick={addManual} style={{ background: "#16a34a", border: "none", color: "white", borderRadius: 8, padding: "7px 13px", fontSize: 12, fontWeight: 600, alignSelf: "flex-end", boxShadow: "0 1px 4px rgba(22,163,74,0.3)" }}>Add</button>
+                <textarea value={manualText} onChange={e => setManualText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addManual(); } }} placeholder="Type / paste what was just said…" rows={3} style={{ flex: 1, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 10px", fontSize: 12, fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "none" }} />
+                <button onClick={addManual} style={{ background: "#6D28D9", border: "none", color: "white", borderRadius: 8, padding: "7px 13px", fontSize: 12, fontWeight: 600, alignSelf: "flex-end", boxShadow: "0 1px 4px rgba(109,40,217,0.3)" }}>Add</button>
               </div>
             </div>
           </div>
