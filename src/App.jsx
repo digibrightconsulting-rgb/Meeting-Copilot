@@ -736,18 +736,8 @@ function MeetingApp({ profile, onEditProfile }) {
     setChatLoading(true);
     try {
       const recentTranscript = transcriptRef.current.slice(-10).map(t => t.text).join(" ");
-      const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("
-");
-      const prompt = `You are a real-time AI assistant supporting a ${profile.role} during a meeting.
-Professional expertise: ${profile.expertise.join(", ")}
-Session goal: ${sessionGoal || "Not specified"}
-Recent meeting transcript: "${recentTranscript || "No transcript yet"}"
-${historyText ? `Chat history:
-${historyText}` : ""}
-
-User question: ${userMsg}
-
-Give a concise, direct, expert answer in 1-3 sentences. Ground it in their professional expertise where relevant. No preamble.`;
+      const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("\n");
+      const prompt = `You are a real-time AI assistant supporting a ${profile.role} during a meeting.\nProfessional expertise: ${profile.expertise.join(", ")}\nSession goal: ${sessionGoal || "Not specified"}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nGive a concise expert answer in 1-3 sentences. No preamble.`;
       const raw = await callClaude(prompt);
       const cleanResponse = raw.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').trim();
       setChatHistory(prev => [...prev, { role: "ai", text: cleanResponse }]);
