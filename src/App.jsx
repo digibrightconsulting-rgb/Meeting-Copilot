@@ -298,6 +298,7 @@ function Onboarding({ onComplete }) {
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [customSkill, setCustomSkill] = useState("");
   const [selectedRole, setSelectedRole] = useState(null);
+  const [consentGiven, setConsentGiven] = useState(false);
 
   const totalSteps = 7;
 
@@ -327,7 +328,8 @@ function Onboarding({ onComplete }) {
 
   const canNext = () => {
     if (step === 1) return profile.name.trim() && profile.role.trim();
-    if (step === 2) return profile.expertise.length > 0;
+    if (step === 2) return selectedRole !== null;
+    if (step === 6) return consentGiven;
     return true;
   };
 
@@ -545,7 +547,20 @@ function Onboarding({ onComplete }) {
                 </div>
               ))}
             </div>
-            <NavButtons nextLabel="Let's go! ⚡" onNext={finish} disabled={false} />
+            <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 12, padding: "16px 18px", marginTop: 16 }}>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={consentGiven}
+                  onChange={e => setConsentGiven(e.target.checked)}
+                  style={{ marginTop: 2, width: 16, height: 16, accentColor: "#16a34a", flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>
+                  I understand that Unmute listens to my meeting audio in real time to generate suggestions. <strong>Audio is never recorded or stored.</strong> I am responsible for ensuring compliance with local recording consent laws in my jurisdiction, and for informing meeting participants where required. I have read and agree to the <a href="https://meetunmute.com/terms" target="_blank" style={{ color: "#16a34a" }}>Terms of Service</a> and <a href="https://meetunmute.com/privacy" target="_blank" style={{ color: "#16a34a" }}>Privacy Policy</a>.
+                </span>
+              </label>
+            </div>
+            <NavButtons nextLabel="Let's go! ⚡" onNext={finish} disabled={!consentGiven} />
           </div>
         )}
       </div>
@@ -588,6 +603,8 @@ function MeetingApp({ profile, onEditProfile }) {
   const [mode, setMode] = useState("prep");
   const [language, setLanguage] = useState(profile.language || LANGUAGES[0]);
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [sessionConsentGiven, setSessionConsentGiven] = useState(false);
 
   const [prepTopic, setPrepTopic]       = useState("");
   const [prepAttendees, setPrepAttendees] = useState("");
@@ -672,6 +689,28 @@ function MeetingApp({ profile, onEditProfile }) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setIsListening(false); setLiveStatus("idle");
   }, []);
+
+  const endMeeting = useCallback(() => {
+    if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setIsListening(false); setLiveStatus("idle");
+    if (transcriptRef.current.length > 0) {
+      setMode("summary");
+      setSummary(null);
+      setSummaryLoading(true);
+      setSummaryError("");
+      callClaude(buildSummaryPrompt(profile, transcriptRef.current, sessionGoal, prepTopic, prepAttendees))
+        .then(raw => {
+          setSummary(JSON.parse(raw.replace(/```json|```/g, "").trim()));
+          setSummaryLoading(false);
+        })
+        .catch(e => {
+          console.error(e);
+          setSummaryError("Error generating summary. Try again.");
+          setSummaryLoading(false);
+        });
+    }
+  }, [profile, sessionGoal, prepTopic, prepAttendees]);
 
   const addManual = () => {
     if (!manualText.trim()) return;
@@ -759,9 +798,9 @@ function MeetingApp({ profile, onEditProfile }) {
         {mode === "live" && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={clearSession} style={{ background: "white", border: "1px solid #d1d5db", color: "#6b7280", borderRadius: 8, padding: "6px 14px", fontSize: 12, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>Clear</button>
-            <button onClick={isListening ? stopListening : startListening} style={{ background: isListening ? "#fef2f2" : "#f0fdf4", border: `1px solid ${isListening ? "#fca5a5" : "#86efac"}`, color: isListening ? "#dc2626" : "#16a34a", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
+            <button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#fef2f2" : "#f0fdf4", border: `1px solid ${isListening ? "#fca5a5" : "#86efac"}`, color: isListening ? "#dc2626" : "#16a34a", borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
               <div style={{ width: isListening ? 8 : 9, height: isListening ? 8 : 9, borderRadius: isListening ? 2 : "50%", background: isListening ? "#dc2626" : "#16a34a", animation: isListening ? "pulse 1.2s infinite" : "none" }} />
-              {isListening ? "Stop Listening" : "Start Listening"}
+              {isListening ? "End Meeting" : "Start Listening"}
             </button>
           </div>
         )}
@@ -850,7 +889,8 @@ function MeetingApp({ profile, onEditProfile }) {
           {summaryLoading && (
             <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 14, padding: "48px 32px", textAlign: "center" }}>
               <div style={{ width: 28, height: 28, border: "3px solid #16a34a", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto 16px" }} />
-              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Analysing your meeting…</p>
+              <p style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 600, color: "#374151" }}>Generating your summary…</p>
+              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Analysing your meeting transcript and building your debrief.</p>
             </div>
           )}
 
@@ -981,6 +1021,42 @@ function MeetingApp({ profile, onEditProfile }) {
                 <textarea value={manualText} onChange={e => setManualText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); addManual(); } }} placeholder="Type / paste what was just said…" rows={3} style={{ flex: 1, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, color: "#111827", padding: "7px 10px", fontSize: 12, fontFamily: "'DM Sans', sans-serif", resize: "none" }} />
                 <button onClick={addManual} style={{ background: "#16a34a", border: "none", color: "white", borderRadius: 8, padding: "7px 13px", fontSize: 12, fontWeight: 600, alignSelf: "flex-end", boxShadow: "0 1px 4px rgba(22,163,74,0.3)" }}>Add</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Consent Modal ── */}
+      {showConsentModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ background: "white", borderRadius: 16, padding: "32px", maxWidth: 480, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.2)", animation: "slideIn 0.2s ease" }}>
+            <div style={{ width: 48, height: 48, background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 16 }}>🎙️</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 700, color: "#111827" }}>Before you start listening</h3>
+            <p style={{ margin: "0 0 20px", fontSize: 13, color: "#6b7280", lineHeight: 1.7 }}>
+              Unmute will listen to your meeting audio in real time to generate AI suggestions. Please confirm the following:
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+              {[
+                "🔒 Audio is processed in real time and never recorded or stored",
+                "⚖️ I am responsible for complying with local recording consent laws",
+                "👥 I will inform meeting participants where required by law",
+                "🤖 Suggestions are AI-generated and should be used with professional judgement",
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "#f9fafb", border: "1px solid #f3f4f6", borderRadius: 8, padding: "10px 12px" }}>
+                  <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.5 }}>{item}</span>
+                </div>
+              ))}
+            </div>
+            <p style={{ margin: "0 0 20px", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
+              By clicking confirm you agree to our <a href="https://meetunmute.com/terms" target="_blank" style={{ color: "#16a34a" }}>Terms of Service</a> and <a href="https://meetunmute.com/privacy" target="_blank" style={{ color: "#16a34a" }}>Privacy Policy</a>.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowConsentModal(false)} style={{ flex: 1, background: "white", border: "1px solid #e5e7eb", color: "#6b7280", borderRadius: 9, padding: "11px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button onClick={() => { setSessionConsentGiven(true); setShowConsentModal(false); startListening(); }} style={{ flex: 2, background: "#16a34a", border: "none", color: "white", borderRadius: 9, padding: "11px", fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 2px 8px rgba(22,163,74,0.3)" }}>
+                ✓ Confirm & Start Listening
+              </button>
             </div>
           </div>
         </div>
