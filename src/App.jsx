@@ -340,11 +340,11 @@ function Onboarding({ onComplete }) {
   };
 
   const btnStyle = (active) => ({
-    background: active ? "#16a34a" : "white",
+    background: active ? "#6D28D9" : "white",
     color: active ? "white" : "#374151",
-    border: active ? "2px solid #16a34a" : "2px solid #e5e7eb",
+    border: active ? "2px solid #6D28D9" : "2px solid #E4DCFB",
     borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer",
-    fontFamily: "'DM Sans', sans-serif", fontWeight: active ? 600 : 400,
+    fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: active ? 600 : 400,
     transition: "all 0.15s",
   });
 
@@ -362,11 +362,11 @@ function Onboarding({ onComplete }) {
         ? <button onClick={() => setStep(s => s - 1)} style={{ background: "none", border: "none", color: "#9ca3af", fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>← Back</button>
         : <div />}
       <button onClick={onNext || (() => setStep(s => s + 1))} disabled={disabled ?? !canNext()} style={{
-        background: (disabled ?? !canNext()) ? "#f3f4f6" : "#16a34a",
-        color: (disabled ?? !canNext()) ? "#9ca3af" : "white",
+        background: (disabled ?? !canNext()) ? "#F5F3FF" : "#6D28D9",
+        color: (disabled ?? !canNext()) ? "#C4B5FD" : "white",
         border: "none", borderRadius: 10, padding: "12px 28px",
         fontSize: 14, fontWeight: 600, cursor: (disabled ?? !canNext()) ? "not-allowed" : "pointer",
-        fontFamily: "'DM Sans', sans-serif", boxShadow: (disabled ?? !canNext()) ? "none" : "0 2px 8px rgba(22,163,74,0.3)",
+        fontFamily: "'Plus Jakarta Sans', sans-serif", boxShadow: (disabled ?? !canNext()) ? "none" : "0 2px 8px rgba(109,40,217,0.3)",
         transition: "all 0.15s",
       }}>{nextLabel}</button>
     </div>
@@ -375,7 +375,7 @@ function Onboarding({ onComplete }) {
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #f0fdf4 0%, #eff6ff 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'DM Sans', sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;0,9..144,900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
         @keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
         *{box-sizing:border-box}
         input,textarea{outline:none}
@@ -391,7 +391,7 @@ function Onboarding({ onComplete }) {
             <Progress step={step} total={totalSteps} />
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ width: 64, height: 64, background: "#16a34a", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 16px rgba(22,163,74,0.3)" }}>⚡</div>
-              <h1 style={{ margin: "0 0 10px", fontSize: 26, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em" }}>Welcome to Meeting Co‑Pilot</h1>
+              <h1 style={{ margin: "0 0 10px", fontSize: 26, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em" }}>Welcome to Unmute</h1>
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14, lineHeight: 1.7 }}>Your AI-powered meeting assistant that listens to conversations and gives you real-time talking points, rebuttals, and insights — tailored to your profession.</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 8 }}>
@@ -437,7 +437,7 @@ function Onboarding({ onComplete }) {
                   color: selectedRole === pack.id ? "#15803d" : "#374151",
                   border: selectedRole === pack.id ? "2px solid #16a34a" : "2px solid #e5e7eb",
                   borderRadius: 12, padding: "14px 16px", fontSize: 13,
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontWeight: selectedRole === pack.id ? 700 : 500,
                   display: "flex", alignItems: "center", gap: 10,
                   textAlign: "left", transition: "all 0.15s",
@@ -509,7 +509,7 @@ function Onboarding({ onComplete }) {
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>Co-Pilot will listen in this language and always give suggestions in English.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>Unmute will listen in this language and always give suggestions in English.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 8 }}>
               {LANGUAGES.map(lang => (
                 <button key={lang.code} onClick={() => update("language", lang)} style={{
