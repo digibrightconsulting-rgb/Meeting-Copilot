@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const API_KEY = import.meta.env.VITE_ANTHROPIC_KEY;
+// API calls go through backend — key never exposed in frontend
 
 // ── Languages ──────────────────────────────────────────────────────────────
 const LANGUAGES = [
@@ -205,14 +205,9 @@ const DEFAULT_PROFILE = {
 // ── Claude call ────────────────────────────────────────────────────────────
 // Cheap model for real-time suggestions (live + Ask AI)
 async function callClaudeFast(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/chat", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 600,
@@ -226,14 +221,9 @@ async function callClaudeFast(prompt) {
 
 // Full model for prep briefs and summaries
 async function callClaude(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/chat", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 800,
