@@ -13,14 +13,14 @@ const LANGUAGES = [
 ];
 
 const MEETING_TYPES = [
-  "Weekly team / standup",
-  "Management / leadership meeting",
-  "Client presentation",
-  "Budget review",
-  "Strategy planning",
-  "Sales call",
+  "Weekly team standup",
+  "Management / leadership call",
+  "Client video call",
+  "Budget / finance review",
+  "Strategy & planning session",
+  "Sales call / demo",
   "Performance review",
-  "Board meeting",
+  "Cross-functional team call",
 ];
 
 const ROLE_PACKS = [
@@ -392,7 +392,7 @@ function Onboarding({ onComplete }) {
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ width: 64, height: 64, background: "#16a34a", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 16px rgba(22,163,74,0.3)" }}>⚡</div>
               <h1 style={{ margin: "0 0 10px", fontSize: 26, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em" }}>Welcome to Unmute</h1>
-              <p style={{ margin: 0, color: "#6b7280", fontSize: 14, lineHeight: 1.7 }}>Your AI-powered meeting assistant that listens to conversations and gives you real-time talking points, rebuttals, and insights — tailored to your profession.</p>
+              <p style={{ margin: 0, color: "#6b7280", fontSize: 14, lineHeight: 1.7 }}>Your AI co-pilot for Zoom, Google Meet, and Teams. Get real-time talking points, rebuttals, and expert insights — tailored to your role — right as the conversation unfolds.</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 8 }}>
               {[
@@ -416,7 +416,7 @@ function Onboarding({ onComplete }) {
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>Tell us about yourself</h2>
-            <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>This helps personalise your talking points to your role and expertise.</p>
+            <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>This helps Unmute tailor every suggestion to your specific role and expertise on video calls.</p>
             <Field label="Your Name *" value={profile.name} onChange={v => update("name", v)} placeholder="e.g. Shad" />
             <Field label="Your Job Title / Role *" value={profile.role} onChange={v => update("role", v)} placeholder="e.g. Paid Media & Marketing Measurement Analyst" />
             <Field label="Preferred Tone" value={profile.tone} onChange={v => update("tone", v)} placeholder="e.g. Confident, data-backed, strategic" />
@@ -429,7 +429,7 @@ function Onboarding({ onComplete }) {
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What best describes your role?</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>We'll pre-load the most relevant skills for your role — you can customise them in the next step.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>We'll pre-load the most relevant skills for your role — so your video call suggestions are always on point.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
               {ROLE_PACKS.map(pack => (
                 <button key={pack.id} onClick={() => selectRolePack(pack)} style={{
@@ -492,7 +492,7 @@ function Onboarding({ onComplete }) {
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What type of meetings do you mostly attend?</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>This sets the default context for your suggestions.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>This tells Unmute what type of video calls you attend most so suggestions are always relevant.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
               {MEETING_TYPES.map(type => (
                 <button key={type} onClick={() => update("meetingType", type)} style={btnStyle(profile.meetingType === type)}>
@@ -509,7 +509,7 @@ function Onboarding({ onComplete }) {
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>Unmute will listen in this language and always give suggestions in English.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>On international video calls? Unmute listens in your meeting language and delivers all suggestions in English.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 8 }}>
               {LANGUAGES.map(lang => (
                 <button key={lang.code} onClick={() => update("language", lang)} style={{
