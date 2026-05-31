@@ -285,19 +285,17 @@ Goal: ${goal}
 Attendees: ${attendees}
 Expected topics / concerns: ${concerns}
 ${data ? `Relevant data / context: ${data}` : ""}
-${files && files.length > 0 ? `Uploaded files for analysis: ${files.map(f => f.name).join(", ")} — analyse these carefully and reference specific data, figures, and insights from them in your talking points.` : ""}
 
-Generate a structured pre-meeting brief with talking points.
+Generate a concise pre-meeting brief. Keep every point SHORT — one punchy sentence max per bullet. No paragraphs.
 
 Respond ONLY with a JSON array, no markdown, no preamble:
 [
-  { "type": "Opening",               "text": "...", "note": "when to use this" },
-  { "type": "Key Argument",          "text": "...", "note": "when to use this" },
-  { "type": "Key Argument",          "text": "...", "note": "when to use this" },
-  { "type": "Data Point",            "text": "...", "note": "when to use this" },
-  { "type": "Anticipated Objection", "text": "...", "note": "likely from who" },
-  { "type": "Rebuttal",              "text": "...", "note": "response to above" },
-  { "type": "Close / Ask",           "text": "...", "note": "what you want to walk away with" }
+  { "type": "Opening",               "points": ["One-line opener...", "Second point if needed..."], "note": "when to use" },
+  { "type": "Key Arguments",         "points": ["Argument 1 — short & sharp", "Argument 2", "Argument 3"], "note": "lead with these" },
+  { "type": "Data Points",           "points": ["Specific stat or figure", "Second data point"], "note": "have these ready" },
+  { "type": "Anticipated Objection", "points": ["Likely pushback..."], "note": "be ready for this" },
+  { "type": "Rebuttal",              "points": ["Sharp one-line response...", "Follow-up if needed..."], "note": "fire back with this" },
+  { "type": "Close / Ask",           "points": ["Specific ask — what you want to leave with"], "note": "end on this" }
 ]`;
 }
 
