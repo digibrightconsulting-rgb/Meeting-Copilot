@@ -203,6 +203,28 @@ const DEFAULT_PROFILE = {
 };
 
 // ── Claude call ────────────────────────────────────────────────────────────
+// Cheap model for real-time suggestions (live + Ask AI)
+async function callClaudeFast(prompt) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 600,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const data = await res.json();
+  const raw = data.content?.find((b) => b.type === "text")?.text || "[]";
+  return raw.replace(/```json|```/g, "").trim();
+}
+
+// Full model for prep briefs and summaries
 async function callClaude(prompt) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -214,7 +236,7 @@ async function callClaude(prompt) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1500,
+      max_tokens: 800,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -223,39 +245,6 @@ async function callClaude(prompt) {
   return raw.replace(/```json|```/g, "").trim();
 }
 
-async function callClaudeWithFiles(prompt, files) {
-  if (!files || files.length === 0) return callClaude(prompt);
-  const contentBlocks = [];
-  for (const f of files) {
-    if (f.type === "text") {
-      contentBlocks.push({ type: "text", text: `File: ${f.name}
-
-${f.textContent}` });
-    } else if (f.mediaType === "application/pdf") {
-      contentBlocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.base64 } });
-    } else if (f.mediaType.startsWith("image/")) {
-      contentBlocks.push({ type: "image", source: { type: "base64", media_type: f.mediaType, data: f.base64 } });
-    }
-  }
-  contentBlocks.push({ type: "text", text: prompt });
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: contentBlocks }],
-    }),
-  });
-  const data = await res.json();
-  const raw = data.content?.find((b) => b.type === "text")?.text || "[]";
-  return raw.replace(/```json|```/g, "").trim();
-}
 
 // ── Prompts ────────────────────────────────────────────────────────────────
 function buildLivePrompt(profile, transcript, goal, language, prepContext) {
@@ -291,7 +280,7 @@ Respond ONLY with a JSON array, no markdown, no preamble:
 Types: Talking Point | Rebuttal | Data Insight | Question | Idea | Reframe | Close`;
 }
 
-function buildPrepPrompt(profile, topic, attendees, goal, concerns, data, files) {
+function buildPrepPrompt(profile, topic, attendees, goal, concerns, data) {
   return `You are preparing a ${profile.role} for an important meeting.
 
 PROFESSIONAL PROFILE:
@@ -788,8 +777,7 @@ function MeetingApp({ profile, onEditProfile }) {
   const [prepPoints, setPrepPoints]     = useState([]);
   const [prepLoading, setPrepLoading]   = useState(false);
   const [prepError, setPrepError]       = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState([]);
-  const fileInputRef = useRef(null);
+
   const [savedMeetings, setSavedMeetings] = useState(() => {
     try { return JSON.parse(localStorage.getItem("unmute_saved_meetings") || "[]"); } catch { return []; }
   });
@@ -819,7 +807,7 @@ function MeetingApp({ profile, onEditProfile }) {
     if (!prepTopic.trim()) { setPrepError("Please enter a meeting topic."); return; }
     setPrepLoading(true); setPrepError("");
     try {
-      const raw = await callClaudeWithFiles(buildPrepPrompt(profile, prepTopic, prepAttendees, prepGoal, prepConcerns, prepData, uploadedFiles), uploadedFiles);
+      const raw = await callClaude(buildPrepPrompt(profile, prepTopic, prepAttendees, prepGoal, prepConcerns, prepData));
       setPrepPoints(JSON.parse(raw));
       if (prepGoal) setSessionGoal(prepGoal);
     } catch (e) { setPrepError("Error generating brief. Check API key."); console.error(e); }
@@ -832,7 +820,7 @@ function MeetingApp({ profile, onEditProfile }) {
     setLiveStatus("thinking");
     try {
       const prepContext = prepTopic ? `Meeting: ${prepTopic}. Goal: ${prepGoal}` : "";
-      const raw = await callClaude(buildLivePrompt(profile, recent, sessionGoal, language, prepContext));
+      const raw = await callClaudeFast(buildLivePrompt(profile, recent, sessionGoal, language, prepContext));
       setLiveSuggestions(JSON.parse(raw));
       setLastUpdated(new Date());
       setLiveStatus("listening");
@@ -910,7 +898,7 @@ function MeetingApp({ profile, onEditProfile }) {
       const recentTranscript = transcriptRef.current.slice(-10).map(t => t.text).join(" ");
       const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("\n");
       const prompt = `You are a real-time AI assistant supporting a ${profile.role} during a meeting.\nProfessional expertise: ${profile.expertise.join(", ")}\nSession goal: ${sessionGoal || "Not specified"}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nGive a concise expert answer in 1-3 sentences. No preamble.`;
-      const raw = await callClaude(prompt);
+      const raw = await callClaudeFast(prompt);
       const cleanResponse = raw.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').trim();
       setChatHistory(prev => [...prev, { role: "ai", text: cleanResponse }]);
     } catch (e) {
@@ -919,31 +907,6 @@ function MeetingApp({ profile, onEditProfile }) {
     }
     setChatLoading(false);
   };
-
-  const handleFileUpload = async (e) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
-    const MAX = 3;
-    const remaining = MAX - uploadedFiles.length;
-    const toProcess = files.slice(0, remaining);
-    const processed = await Promise.all(toProcess.map(async (file) => {
-      const isText = file.type === "text/csv" || file.type === "text/plain" || file.name.endsWith(".csv") || file.name.endsWith(".txt");
-      const isImage = file.type.startsWith("image/");
-      const isPdf = file.type === "application/pdf";
-      if (isText) {
-        const textContent = await new Promise(res => { const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsText(file); });
-        return { name: file.name, type: "text", textContent: textContent.slice(0, 8000), mediaType: file.type };
-      } else if (isPdf || isImage) {
-        const base64 = await new Promise(res => { const r = new FileReader(); r.onload = e => res(e.target.result.split(",")[1]); r.readAsDataURL(file); });
-        return { name: file.name, type: isPdf ? "pdf" : "image", base64, mediaType: file.type || "application/pdf" };
-      }
-      return null;
-    }));
-    setUploadedFiles(prev => [...prev, ...processed.filter(Boolean)]);
-    e.target.value = "";
-  };
-
-  const removeFile = (idx) => setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
 
   const saveMeeting = () => {
     if (!prepTopic.trim()) return;
@@ -1105,44 +1068,9 @@ function MeetingApp({ profile, onEditProfile }) {
             <Field label="Your Goal for This Meeting"  value={prepGoal}      onChange={setPrepGoal}      placeholder="e.g. Get sign-off on Q3 incrementality testing budget" />
             <Field label="Expected Topics / Concerns"  value={prepConcerns}  onChange={setPrepConcerns}  placeholder="e.g. Budget cuts, ROI of measurement tools, channel performance" multiline rows={3} />
             <Field label="Data / Context to Reference" value={prepData}      onChange={setPrepData}      placeholder="e.g. MMM showed paid social drove 34% incremental revenue last quarter" multiline rows={3} />
-            {/* File Upload */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, display: "block", marginBottom: 8 }}>
-                Upload Files for Analysis
-              </label>
-              <input ref={fileInputRef} type="file" multiple accept=".pdf,.csv,.txt,.png,.jpg,.jpeg,.webp" onChange={handleFileUpload} style={{ display: "none" }} />
-              {uploadedFiles.length < 3 && (
-                <button onClick={() => fileInputRef.current?.click()} style={{
-                  width: "100%", background: "#F5F3FF", border: "2px dashed #C4B5FD",
-                  borderRadius: 10, padding: "14px", cursor: "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  color: "#6D28D9", fontSize: 13, fontWeight: 500, transition: "all 0.15s",
-                }}>
-                  <span style={{ fontSize: 18 }}>📎</span>
-                  <span>Upload reports, data, contracts, charts…</span>
-                </button>
-              )}
-              <p style={{ margin: "5px 0 0", fontSize: 11, color: "#9B8FC0" }}>PDF, CSV, TXT, images · Max 3 files · AI will reference specific data from these in your brief</p>
-              {uploadedFiles.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-                  {uploadedFiles.map((f, i) => {
-                    const icon = f.type === "pdf" ? "📄" : f.type === "image" ? "🖼️" : "📊";
-                    return (
-                      <div key={i} style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 16 }}>{icon}</span>
-                        <span style={{ fontSize: 12, color: "#3B0764", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
-                        <span style={{ fontSize: 10, color: "#7C3AED", fontFamily: "monospace", background: "#DDD6FE", padding: "2px 6px", borderRadius: 4 }}>{f.type.toUpperCase()}</span>
-                        <button onClick={() => removeFile(i)} style={{ background: "none", border: "none", color: "#7C3AED", cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1 }}>✕</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
             {prepError && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", marginBottom: 14, color: "#dc2626", fontSize: 12, fontFamily: "monospace" }}>⚠ {prepError}</div>}
             <button onClick={generatePrep} disabled={prepLoading} style={{ width: "100%", background: "#6D28D9", border: "none", color: "white", borderRadius: 10, padding: "13px", fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 9, boxShadow: "0 2px 8px rgba(109,40,217,0.3)" }}>
-              {prepLoading ? <><div style={{ width: 14, height: 14, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />{uploadedFiles.length > 0 ? "Analysing files & generating brief…" : "Generating Brief…"}</> : `⚡  Generate Meeting Brief${uploadedFiles.length > 0 ? ` · ${uploadedFiles.length} file${uploadedFiles.length > 1 ? "s" : ""} attached` : ""}`}
+              {prepLoading ? <><div style={{ width: 14, height: 14, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />Generating Brief…</> : "⚡  Generate Meeting Brief"}
             </button>
             {prepTopic.trim() && (
               <button onClick={saveMeeting} style={{ width: "100%", marginTop: 10, background: "white", border: "1px solid #DDD6FE", color: "#5B21B6", borderRadius: 10, padding: "11px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
