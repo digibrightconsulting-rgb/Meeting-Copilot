@@ -366,9 +366,12 @@ Produce a structured debrief. Respond ONLY with a JSON object, no markdown, no p
 const TYPE_STYLES = {
   "Talking Point":         { border: "#16a34a", bg: "#f0fdf4", badge: "#dcfce7", badgeText: "#15803d" },
   "Key Argument":          { border: "#16a34a", bg: "#f0fdf4", badge: "#dcfce7", badgeText: "#15803d" },
+  "Key Arguments":         { border: "#16a34a", bg: "#f0fdf4", badge: "#dcfce7", badgeText: "#15803d" },
   "Opening":               { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
   "Rebuttal":              { border: "#dc2626", bg: "#fef2f2", badge: "#fee2e2", badgeText: "#b91c1c" },
+  "Rebuttals":             { border: "#dc2626", bg: "#fef2f2", badge: "#fee2e2", badgeText: "#b91c1c" },
   "Data Point":            { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
+  "Data Points":           { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
   "Data Insight":          { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
   "Anticipated Objection": { border: "#d97706", bg: "#fffbeb", badge: "#fef3c7", badgeText: "#b45309" },
   "Question":              { border: "#7c3aed", bg: "#f5f3ff", badge: "#ede9fe", badgeText: "#6d28d9" },
@@ -382,7 +385,9 @@ const DEFAULT_STYLE = { border: "#94a3b8", bg: "#f8fafc", badge: "#f1f5f9", badg
 function SuggestionCard({ item, index, showNote }) {
   const [copied, setCopied] = useState(false);
   const s = TYPE_STYLES[item.type] || DEFAULT_STYLE;
-  const copy = () => { navigator.clipboard.writeText(item.text); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const textToCopy = item.points ? item.points.join("
+• ") : item.text;
+  const copy = () => { navigator.clipboard.writeText(item.points ? "• " + textToCopy : textToCopy); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   return (
     <div style={{ background: s.bg, border: "1px solid #e5e7eb", borderLeft: `4px solid ${s.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 10, animation: `slideIn 0.25s ease ${index * 0.06}s both`, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
@@ -391,7 +396,15 @@ function SuggestionCard({ item, index, showNote }) {
           {copied ? "✓ Copied" : "Copy"}
         </button>
       </div>
-      <p style={{ margin: 0, color: "#1f2937", fontSize: 13.5, lineHeight: 1.65, fontFamily: "'Georgia', serif" }}>{item.text}</p>
+      {item.points ? (
+        <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+          {item.points.map((pt, i) => (
+            <li key={i} style={{ color: "#1f2937", fontSize: 13, lineHeight: 1.55, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 500 }}>{pt}</li>
+          ))}
+        </ul>
+      ) : (
+        <p style={{ margin: 0, color: "#1f2937", fontSize: 13.5, lineHeight: 1.65, fontFamily: "'Georgia', serif" }}>{item.text}</p>
+      )}
       {showNote && item.note && <p style={{ margin: "8px 0 0", color: "#9ca3af", fontSize: 11, fontFamily: "monospace", borderTop: "1px solid #e5e7eb", paddingTop: 7 }}>↳ {item.note}</p>}
     </div>
   );
