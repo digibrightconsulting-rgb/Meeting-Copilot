@@ -32,26 +32,73 @@ const ROLE_PACKS = [
       "Brand strategy", "Paid media strategy (Meta, Google)", "Campaign performance analysis",
       "Marketing ROI & budget optimisation", "Stakeholder communication", "Media Mix Modelling (MMM)",
       "Content marketing", "Social media strategy", "Go-to-market strategy", "Team leadership",
+      "Agency management", "Marketing attribution", "Executive reporting",
     ],
   },
   {
-    id: "sales",
+    id: "paid-media",
+    label: "Paid Media Specialist",
+    icon: "🎯",
+    skills: [
+      "Paid media strategy (Meta, Google)", "Programmatic advertising", "Campaign performance analysis",
+      "Incrementality testing & measurement", "Media Mix Modelling (MMM)", "Multi-touch attribution",
+      "Marketing ROI & budget optimisation", "A/B testing & experimentation", "Audience targeting",
+      "Bid strategy & optimisation", "Creative testing", "Dashboard & reporting",
+    ],
+  },
+  {
+    id: "social",
+    label: "Social Media Manager",
+    icon: "📱",
+    skills: [
+      "Social media strategy", "Content planning & calendars", "Community management",
+      "Influencer marketing", "Organic reach & engagement", "Paid social advertising",
+      "Social analytics & reporting", "Brand voice & tone", "Trend identification",
+      "Platform algorithm knowledge", "Video & short-form content", "Campaign management",
+    ],
+  },
+  {
+    id: "product-marketing",
+    label: "Product Marketing Manager",
+    icon: "📢",
+    skills: [
+      "Product positioning & messaging", "Go-to-market strategy", "Competitive intelligence",
+      "Customer research & insights", "Launch planning & execution", "Sales enablement",
+      "Stakeholder communication", "Content marketing", "Pricing strategy",
+      "Win/loss analysis", "Feature adoption", "Cross-functional collaboration",
+    ],
+  },
+  {
+    id: "sales-manager",
     label: "Sales Manager",
     icon: "🤝",
     skills: [
-      "Objection handling", "Pipeline management", "Negotiation & closing",
-      "CRM & lifecycle marketing", "Revenue forecasting", "Client relationship management",
-      "Presentation & pitching", "Competitive positioning", "Upselling & cross-selling", "Sales strategy",
+      "Team management & coaching", "Pipeline management", "Revenue forecasting",
+      "Sales strategy", "Objection handling", "CRM management",
+      "Performance reporting", "Negotiation & closing", "Client relationship management",
+      "Competitive positioning", "Quota setting", "Sales process optimisation",
+    ],
+  },
+  {
+    id: "sales-rep",
+    label: "Sales Rep / Account Executive",
+    icon: "💼",
+    skills: [
+      "Objection handling", "Discovery & qualification", "Demo & presentation skills",
+      "Negotiation & closing", "Prospecting & cold outreach", "CRM & lifecycle marketing",
+      "Competitive positioning", "Upselling & cross-selling", "Client relationship management",
+      "Proposal writing", "Follow-up strategy", "Value-based selling",
     ],
   },
   {
     id: "data",
-    label: "Data / Analytics",
+    label: "Data Analyst",
     icon: "📊",
     skills: [
-      "Data-driven decision making", "A/B testing & experimentation", "Incrementality testing & measurement",
-      "Media Mix Modelling (MMM)", "Multi-touch attribution", "Campaign performance analysis",
-      "Statistical modelling", "Dashboard & reporting", "Programmatic advertising", "Marketing ROI & budget optimisation",
+      "Data analysis & interpretation", "Dashboard & reporting", "SQL & data querying",
+      "A/B testing & experimentation", "Statistical modelling", "Data visualisation",
+      "Business intelligence", "Data-driven decision making", "KPI definition & tracking",
+      "Python / R analysis", "Insight communication", "Stakeholder reporting",
     ],
   },
   {
@@ -61,7 +108,41 @@ const ROLE_PACKS = [
     skills: [
       "Product roadmap planning", "Stakeholder management", "User research & discovery",
       "Agile & sprint planning", "Prioritisation frameworks", "Go-to-market strategy",
-      "Data-driven decision making", "Cross-functional collaboration", "OKR setting", "Presentation & pitching",
+      "Data-driven decision making", "Cross-functional collaboration", "OKR setting",
+      "Presentation & pitching", "Feature scoping", "Customer feedback analysis",
+    ],
+  },
+  {
+    id: "lawyer-corporate",
+    label: "Lawyer — Corporate",
+    icon: "⚖️",
+    skills: [
+      "Contract negotiation & drafting", "M&A advisory", "Corporate governance",
+      "Due diligence", "Shareholder agreements", "Regulatory compliance",
+      "Risk assessment", "Board advisory", "Restructuring & insolvency",
+      "Investment & fundraising", "IP & commercial agreements", "Client advisory",
+    ],
+  },
+  {
+    id: "lawyer-employment",
+    label: "Lawyer — Employment",
+    icon: "⚖️",
+    skills: [
+      "Employment contract advice", "Tribunal representation", "Redundancy & restructuring",
+      "Discrimination & harassment claims", "TUPE transfers", "Disciplinary & grievance procedures",
+      "Settlement agreements", "Policy drafting", "Workplace investigations",
+      "Executive exits", "Trade union relations", "Employment legislation compliance",
+    ],
+  },
+  {
+    id: "lawyer-commercial",
+    label: "Lawyer — Commercial / Litigation",
+    icon: "⚖️",
+    skills: [
+      "Commercial contract negotiation", "Dispute resolution", "Litigation strategy",
+      "Mediation & arbitration", "Intellectual property disputes", "Regulatory investigations",
+      "Evidence & disclosure", "Client advisory", "Risk & liability assessment",
+      "Cross-border disputes", "Injunctions & remedies", "Settlement negotiation",
     ],
   },
   {
@@ -112,6 +193,10 @@ const DEFAULT_PROFILE = {
   name: "",
   role: "",
   expertise: [],
+  company: "",
+  jobContext: "",
+  meetingObjective: "",
+  typicalAudience: "",
   meetingType: "Management / leadership meeting",
   language: LANGUAGES[0],
   tone: "Confident, data-backed, strategic",
@@ -300,7 +385,7 @@ function Onboarding({ onComplete }) {
   const [selectedRole, setSelectedRole] = useState(null);
   const [consentGiven, setConsentGiven] = useState(false);
 
-  const totalSteps = 7;
+  const totalSteps = 8;
 
   const update = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
@@ -329,7 +414,7 @@ function Onboarding({ onComplete }) {
   const canNext = () => {
     if (step === 1) return profile.name.trim() && profile.role.trim();
     if (step === 2) return selectedRole !== null;
-    if (step === 6) return consentGiven;
+    if (step === 7) return consentGiven;
     return true;
   };
 
@@ -390,8 +475,8 @@ function Onboarding({ onComplete }) {
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <div style={{ textAlign: "center", marginBottom: 28 }}>
-              <div style={{ width: 64, height: 64, background: "#16a34a", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 16px rgba(22,163,74,0.3)" }}>⚡</div>
-              <h1 style={{ margin: "0 0 10px", fontSize: 26, fontWeight: 700, color: "#111827", letterSpacing: "-0.02em" }}>Welcome to Unmute</h1>
+              <div style={{ width: 64, height: 64, background: "#3B0764", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 20px rgba(59,7,100,0.35)" }}>⚡</div>
+              <h1 style={{ margin: "0 0 10px", fontSize: 26, fontWeight: 700, color: "#3B0764", letterSpacing: "-0.02em", fontFamily: "'Fraunces', Georgia, serif" }}>Welcome to Unmute</h1>
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14, lineHeight: 1.7 }}>Your AI co-pilot for Zoom, Google Meet, and Teams. Get real-time talking points, rebuttals, and expert insights — tailored to your role — right as the conversation unfolds.</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 8 }}>
@@ -487,8 +572,45 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 4 — Meeting Type */}
+        {/* Step 4 — Professional Profile */}
         {step === 4 && (
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
+            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Tell us about your work</h2>
+            <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 13 }}>The more context you give, the more personalised your suggestions will be. All fields optional but highly recommended.</p>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Company / Organisation</label>
+              <input value={profile.company || ""} onChange={e => update("company", e.target.value)} placeholder="e.g. Digibright Consulting" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5 }} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>What do you do day to day?</label>
+              <textarea value={profile.jobContext || ""} onChange={e => update("jobContext", e.target.value)} placeholder="e.g. I manage paid media campaigns across Meta and Google, run incrementality tests, and report MMM results to senior stakeholders and clients." rows={3} style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5, resize: "vertical" }} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>What are you typically trying to achieve in meetings?</label>
+              <textarea value={profile.meetingObjective || ""} onChange={e => update("meetingObjective", e.target.value)} placeholder="e.g. Get budget approved, defend measurement strategy, influence senior stakeholders, present campaign results." rows={2} style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5, resize: "vertical" }} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Who do you typically meet with?</label>
+              <input value={profile.typicalAudience || ""} onChange={e => update("typicalAudience", e.target.value)} placeholder="e.g. CMO, CFO, clients, cross-functional teams, agency partners" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5 }} />
+            </div>
+
+            <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "12px 14px", marginTop: 4 }}>
+              <p style={{ margin: 0, fontSize: 12, color: "#5B21B6", lineHeight: 1.6 }}>
+                💡 This context is used to personalise every suggestion, rebuttal, and debrief to your specific role and company — not just your job title.
+              </p>
+            </div>
+
+            <NavButtons disabled={false} />
+          </div>
+        )}
+
+        {/* Step 5 — Meeting Type */}
+        {step === 5 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What type of meetings do you mostly attend?</h2>
@@ -504,8 +626,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 5 — Language */}
-        {step === 5 && (
+        {/* Step 6 — Language */}
+        {step === 6 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
@@ -525,8 +647,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 6 — Tutorial */}
-        {step === 6 && (
+        {/* Step 7 — Tutorial */}
+        {step === 7 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>How it works</h2>
