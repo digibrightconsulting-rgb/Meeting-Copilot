@@ -364,8 +364,7 @@ const DEFAULT_STYLE = { border: "#94a3b8", bg: "#f8fafc", badge: "#f1f5f9", badg
 function SuggestionCard({ item, index, showNote }) {
   const [copied, setCopied] = useState(false);
   const s = TYPE_STYLES[item.type] || DEFAULT_STYLE;
-  const textToCopy = item.points ? item.points.join("
-• ") : item.text;
+  const textToCopy = item.points ? item.points.join("\n• ") : item.text;
   const copy = () => { navigator.clipboard.writeText(item.points ? "• " + textToCopy : textToCopy); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   return (
     <div style={{ background: s.bg, border: "1px solid #e5e7eb", borderLeft: `4px solid ${s.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 10, animation: `slideIn 0.25s ease ${index * 0.06}s both`, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
