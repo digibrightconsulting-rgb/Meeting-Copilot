@@ -251,51 +251,82 @@ async function callClaude(prompt) {
 function buildLivePrompt(profile, transcript, goal, language, prepContext) {
   const translateNote = language.code !== "en-US"
     ? `The transcript may be in ${language.label}. Translate it to English first, then generate suggestions.` : "";
-  return `You are a real-time meeting co-pilot for a senior professional. Suggest sharp, immediately usable talking points.
+  const styleGuide = {
+    "data-driven": "Back suggestions with specific numbers, evidence, or measurable outcomes.",
+    "strategic": "Frame suggestions around big picture direction, priorities, and long-term impact.",
+    "collaborative": "Phrase suggestions to build consensus, acknowledge others views, and invite input.",
+    "direct": "Keep suggestions short, plain, and assertive — no hedging or fluff.",
+    "diplomatic": "Suggest tactful ways to make points without creating friction.",
+    "adaptive": "Match the energy and tone of the conversation — read what the room needs.",
+  }[profile.communicationStyle] || "Be confident and clear.";
 
-PROFESSIONAL PROFILE:
+  return `You are a real-time meeting co-pilot. Suggest what this person should say RIGHT NOW based on the actual conversation.
+
+ABOUT THIS PERSON:
 Name: ${profile.name}
-Role: ${profile.role}
-Expertise: ${profile.expertise.join(", ")}
-Tone: ${profile.tone}
+Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
+${profile.company ? "Company intelligence: Draw on everything you know about " + profile.company + " — their industry, business model, products, competitors, regulatory environment and culture — to make suggestions specific and relevant. If " + profile.company + " is not well known, use the background context instead." : ""}
+Areas of expertise: ${profile.expertise.join(", ")}
+Communication style: ${styleGuide}
 Meeting type: ${profile.meetingType}
-${goal ? `Session goal: ${goal}` : ""}
-${prepContext ? `Pre-meeting context: ${prepContext}` : ""}
+${profile.jobContext ? "Day to day: " + profile.jobContext : ""}
+${profile.meetingObjective ? "Typically trying to: " + profile.meetingObjective : ""}
+${profile.typicalAudience ? "Typical audience: " + profile.typicalAudience : ""}
+${goal ? "Session goal: " + goal : ""}
+${prepContext ? "Pre-meeting context: " + prepContext : ""}
+${profile.writingSample ? "WRITING STYLE — mirror their vocabulary, sentence length and phrasing: \"" + profile.writingSample + "\"" : ""}
 ${translateNote}
 
 LAST 90 SECONDS OF CONVERSATION:
 "${transcript}"
 
-Generate 3 highly relevant suggestions the person can use RIGHT NOW. Each must be:
-- Directly tied to something just said
-- Grounded in their professional expertise where relevant
-- Short and speakable (1-2 sentences max)
-- All output in English
+CRITICAL RULES:
+1. Respond ONLY to what was actually just said — do not force expertise if it is not relevant
+2. Only reference technical expertise or company-specific knowledge if the conversation genuinely calls for it
+3. Match their communication style exactly
+4. Keep each suggestion short and speakable — 1-2 sentences max
+5. All output in English
+
+Generate 3 suggestions the person can use immediately.
 
 Respond ONLY with a JSON array, no markdown, no preamble:
 [
   { "type": "Talking Point", "text": "..." },
   { "type": "Rebuttal", "text": "..." },
-  { "type": "Data Insight", "text": "..." }
+  { "type": "Question", "text": "..." }
 ]
 Types: Talking Point | Rebuttal | Data Insight | Question | Idea | Reframe | Close`;
 }
 
 function buildPrepPrompt(profile, topic, attendees, goal, concerns, data) {
+  const prepStyleGuide = {
+    "data-driven": "Back every point with specific numbers or measurable outcomes where possible.",
+    "strategic": "Focus on big picture direction and long-term thinking.",
+    "collaborative": "Frame points to build consensus and acknowledge others perspectives.",
+    "direct": "Keep every point short and assertive — no hedging.",
+    "diplomatic": "Phrase points tactfully to avoid friction while still making the case.",
+    "adaptive": "Vary the style based on who is in the room and what the moment needs.",
+  }[profile.communicationStyle] || "Be confident and clear.";
+
   return `You are preparing a ${profile.role} for an important meeting.
 
 PROFESSIONAL PROFILE:
 Name: ${profile.name}
-Role: ${profile.role}
-Expertise: ${profile.expertise.join(", ")}
-Tone: ${profile.tone}
+Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
+${profile.company ? "Company intelligence: Draw on everything you know about " + profile.company + " — their industry, business model, products, competitors and regulatory environment — to make talking points specific and credible. If " + profile.company + " is not well known, use the background context instead." : ""}
+Key expertise: ${profile.expertise.join(", ")}
+Communication style: ${prepStyleGuide}
+${profile.jobContext ? "Background: " + profile.jobContext : ""}
+${profile.meetingObjective ? "Typically trying to achieve: " + profile.meetingObjective : ""}
+${profile.typicalAudience ? "Usual audience: " + profile.typicalAudience : ""}
+${profile.writingSample ? "WRITING STYLE — mirror this person natural voice in all talking points: \"" + profile.writingSample + "\"" : ""}
 
 MEETING DETAILS:
 Topic: ${topic}
 Goal: ${goal}
 Attendees: ${attendees}
 Expected topics / concerns: ${concerns}
-${data ? `Relevant data / context: ${data}` : ""}
+${data ? "Relevant data / context: " + data : ""}
 
 Generate a concise pre-meeting brief. Keep every point SHORT — one punchy sentence max per bullet. No paragraphs.
 
@@ -316,9 +347,11 @@ function buildSummaryPrompt(profile, transcript, goal, prepTopic, prepAttendees)
 
 PROFESSIONAL PROFILE:
 Name: ${profile.name}
-Role: ${profile.role}
+Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
+${profile.company ? "Company context: Use your knowledge of " + profile.company + " to make the debrief and lessons more specific and relevant to their industry." : ""}
 Expertise: ${profile.expertise.join(", ")}
-Tone: ${profile.tone}
+Communication style: ${profile.communicationStyle || "balanced"}
+${profile.jobContext ? "Background: " + profile.jobContext : ""}
 
 MEETING CONTEXT:
 Topic: ${prepTopic || "Not specified"}
@@ -970,7 +1003,15 @@ function MeetingApp({ profile, onEditProfile }) {
     try {
       const recentTranscript = transcriptRef.current.slice(-10).map(t => t.text).join(" ");
       const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("\n");
-      const prompt = `You are a real-time AI assistant supporting a ${profile.role} during a meeting.\nProfessional expertise: ${profile.expertise.join(", ")}\nSession goal: ${sessionGoal || "Not specified"}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nGive a concise expert answer in 1-3 sentences. No preamble.`;
+      const chatStyle = {
+        "data-driven": "Use numbers and evidence in your answer.",
+        "strategic": "Frame your answer around direction and priorities.",
+        "collaborative": "Phrase your answer to help them bring people along.",
+        "direct": "Answer directly and briefly — no fluff.",
+        "diplomatic": "Answer tactfully.",
+        "adaptive": "Match the tone of the question.",
+      }[profile.communicationStyle] || "Be clear and confident.";
+      const prompt = `You are a real-time AI assistant for a ${profile.role}${profile.company ? " at " + profile.company : ""} on a video call. ${chatStyle}\n${profile.company ? "Draw on your knowledge of " + profile.company + " — their industry, products, competitors and business model — to give relevant answers." : ""}\nExpertise: ${profile.expertise.join(", ")}\n${profile.jobContext ? "Background: " + profile.jobContext : ""}\n${profile.writingSample ? "Mirror their writing style: \"" + profile.writingSample + "\"" : ""}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nAnswer in 1-3 sentences. Only use company or expertise knowledge if directly relevant. No preamble.`;
       const raw = await callClaudeFast(prompt);
       const cleanResponse = raw.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').trim();
       setChatHistory(prev => [...prev, { role: "ai", text: cleanResponse }]);
