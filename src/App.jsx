@@ -197,10 +197,20 @@ const DEFAULT_PROFILE = {
   jobContext: "",
   meetingObjective: "",
   typicalAudience: "",
+  communicationStyle: "",
   meetingType: "Management / leadership meeting",
   language: LANGUAGES[0],
   tone: "Confident, data-backed, strategic",
 };
+
+const COMMUNICATION_STYLES = [
+  { id: "data-driven", label: "Data-driven", icon: "📊", desc: "Back points with numbers and evidence" },
+  { id: "strategic", label: "Strategic", icon: "🗺️", desc: "Big picture, direction and long-term thinking" },
+  { id: "collaborative", label: "Collaborative", icon: "🤝", desc: "Build consensus, acknowledge others' views" },
+  { id: "direct", label: "Direct & assertive", icon: "⚡", desc: "Say it straight, no fluff" },
+  { id: "diplomatic", label: "Diplomatic", icon: "🕊️", desc: "Tactful, careful with relationships" },
+  { id: "adaptive", label: "Adaptive", icon: "🌊", desc: "Read the room and match the energy" },
+];
 
 // ── Claude call ────────────────────────────────────────────────────────────
 // Cheap model for real-time suggestions (live + Ask AI)
@@ -623,9 +633,30 @@ function Onboarding({ onComplete }) {
               <input value={profile.typicalAudience || ""} onChange={e => update("typicalAudience", e.target.value)} placeholder="e.g. CMO, CFO, clients, cross-functional teams, agency partners" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5 }} />
             </div>
 
-            <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "12px 14px", marginTop: 4 }}>
+            <div style={{ marginTop: 18 }}>
+              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, display: "block", marginBottom: 10 }}>How do you want to come across in meetings?</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {COMMUNICATION_STYLES.map(style => (
+                  <button key={style.id} onClick={() => update("communicationStyle", style.id)} style={{
+                    background: profile.communicationStyle === style.id ? "#F5F3FF" : "white",
+                    border: profile.communicationStyle === style.id ? "2px solid #6D28D9" : "2px solid #E4DCFB",
+                    borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                    textAlign: "left", transition: "all 0.15s",
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                  }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{style.icon}</span>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: profile.communicationStyle === style.id ? "#5B21B6" : "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.label}</div>
+                      <div style={{ fontSize: 11, color: "#9B8FC0", lineHeight: 1.4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "12px 14px", marginTop: 14 }}>
               <p style={{ margin: 0, fontSize: 12, color: "#5B21B6", lineHeight: 1.6 }}>
-                💡 This context is used to personalise every suggestion, rebuttal, and debrief to your specific role and company — not just your job title.
+                💡 This shapes how Unmute phrases suggestions — so they sound like you, not like a generic AI.
               </p>
             </div>
 
