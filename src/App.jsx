@@ -198,6 +198,7 @@ const DEFAULT_PROFILE = {
   meetingObjective: "",
   typicalAudience: "",
   communicationStyle: "",
+  writingSample: "",
   meetingType: "Management / leadership meeting",
   language: LANGUAGES[0],
   tone: "Confident, data-backed, strategic",
@@ -419,7 +420,7 @@ function Onboarding({ onComplete }) {
   const [selectedRole, setSelectedRole] = useState(null);
   const [consentGiven, setConsentGiven] = useState(false);
 
-  const totalSteps = 8;
+  const totalSteps = 9;
 
   const update = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
@@ -448,7 +449,8 @@ function Onboarding({ onComplete }) {
   const canNext = () => {
     if (step === 1) return profile.name.trim() && profile.role.trim();
     if (step === 2) return selectedRole !== null;
-    if (step === 7) return consentGiven;
+    if (step === 5) return profile.writingSample && profile.writingSample.trim().length > 20;
+    if (step === 8) return consentGiven;
     return true;
   };
 
@@ -467,13 +469,22 @@ function Onboarding({ onComplete }) {
     transition: "all 0.15s",
   });
 
-  const Progress = ({ step, total }) => (
-    <div style={{ display: "flex", gap: 6, marginBottom: 32 }}>
-      {Array.from({ length: total }).map((_, i) => (
-        <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? "#16a34a" : "#e5e7eb", transition: "background 0.3s" }} />
-      ))}
-    </div>
-  );
+  const Progress = ({ step, total }) => {
+    const phase = step <= 3 ? "Setting up your profile…" : step <= 7 ? "Personalising your suggestions…" : "Almost ready…";
+    return (
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
+          {Array.from({ length: total }).map((_, i) => (
+            <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? "#6D28D9" : "#EDE9FE", transition: "background 0.3s" }} />
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "#9B8FC0", fontFamily: "monospace" }}>{phase}</span>
+          <span style={{ fontSize: 11, color: "#C4B5FD", fontFamily: "monospace" }}>{step + 1} of {total}</span>
+        </div>
+      </div>
+    );
+  };
 
   const NavButtons = ({ nextLabel = "Continue →", onNext, disabled }) => (
     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 28 }}>
@@ -664,8 +675,53 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 5 — Meeting Type */}
+        {/* Step 5 — Your Voice / Writing Sample */}
         {step === 5 && (
+          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+            <Progress step={step} total={totalSteps} />
+            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Your voice</h2>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13, lineHeight: 1.6 }}>Paste 2-3 sentences you've actually written at work — an email, a Slack message, a report. Unmute will match your natural style in every suggestion.</p>
+
+            <textarea
+              value={profile.writingSample || ""}
+              onChange={e => update("writingSample", e.target.value)}
+              placeholder={"e.g. "Quick update on the May results — the numbers are pretty clear that UK spend isn't delivering incremental return. My recommendation is we pause it and reallocate before June locks in.""}
+              rows={5}
+              style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 10, color: "#1E1033", padding: "12px 14px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "vertical", lineHeight: 1.6 }}
+            />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>
+              {[
+                { label: "📧 Email", example: "Hey team — just wanted to flag that the Q2 numbers are in and they're looking strong. Happy to walk everyone through the highlights on Friday's call." },
+                { label: "💬 Slack", example: "Quick heads up — the budget meeting got moved to 3pm. I'd recommend we align on the key numbers before then so we're all on the same page." },
+                { label: "📄 Report", example: "The data shows a clear pattern across all three markets. Paid social is consistently outperforming search on incremental return, particularly in the 25-34 demographic." },
+              ].map((ex, i) => (
+                <button key={i} onClick={() => update("writingSample", ex.example)} style={{
+                  background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8,
+                  padding: "8px 10px", cursor: "pointer", textAlign: "left", fontSize: 11,
+                  color: "#5B21B6", fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 600,
+                }}>
+                  {ex.label}
+                  <div style={{ fontSize: 10, color: "#9B8FC0", fontWeight: 400, marginTop: 3, lineHeight: 1.4 }}>Use this example</div>
+                </button>
+              ))}
+            </div>
+
+            {profile.writingSample && profile.writingSample.trim().length > 20 && (
+              <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px", marginTop: 14, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <span style={{ fontSize: 14, flexShrink: 0 }}>✓</span>
+                <p style={{ margin: 0, fontSize: 12, color: "#5B21B6", lineHeight: 1.6 }}>
+                  Got it — Unmute will match your vocabulary, sentence length, and tone in every suggestion.
+                </p>
+              </div>
+            )}
+
+            <NavButtons />
+          </div>
+        )}
+
+        {/* Step 6 — Meeting Type */}
+        {step === 6 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What type of meetings do you mostly attend?</h2>
@@ -681,8 +737,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 6 — Language */}
-        {step === 6 && (
+        {/* Step 7 — Language */}
+        {step === 7 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
@@ -702,8 +758,8 @@ function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* Step 7 — Tutorial */}
-        {step === 7 && (
+        {/* Step 8 — Tutorial */}
+        {step === 8 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>How it works</h2>
