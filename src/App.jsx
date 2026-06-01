@@ -545,11 +545,10 @@ function Onboarding({ onComplete }) {
         {step === 1 && (
           <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
-            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>Tell us about yourself</h2>
-            <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>This helps Unmute tailor every suggestion to your specific role and expertise on video calls.</p>
-            <Field label="Your Name *" value={profile.name} onChange={v => update("name", v)} placeholder="e.g. Shad" />
+            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Tell us about yourself</h2>
+            <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>This helps Unmute tailor every suggestion to your specific role on video calls.</p>
+            <Field label="Your Name *" value={profile.name} onChange={v => update("name", v)} placeholder="e.g. John" />
             <Field label="Your Job Title / Role *" value={profile.role} onChange={v => update("role", v)} placeholder="e.g. Paid Media & Marketing Measurement Analyst" />
-            <Field label="Preferred Tone" value={profile.tone} onChange={v => update("tone", v)} placeholder="e.g. Confident, data-backed, strategic" />
             <NavButtons />
           </div>
         )}
@@ -768,7 +767,7 @@ function Onboarding({ onComplete }) {
               {[
                 { icon: "⚙", color: "#2563eb", bg: "#eff6ff", title: "Before the meeting — Prep tab", desc: "Enter the meeting topic, who's attending, your goal, and any data you want to reference. Click Generate and get a full personalised brief with talking points, anticipated objections, and a close." },
                 { icon: "●", color: "#16a34a", bg: "#f0fdf4", title: "During the meeting — Live tab", desc: "Click Start Listening and your mic picks up the conversation. Every ~18 seconds, AI suggestions appear on the right. Hit ↻ Refresh any time for instant suggestions." },
-                { icon: "✍", color: "#7c3aed", bg: "#f5f3ff", title: "Manual input", desc: "Not using the mic? Just type or paste what was just said in the box at the bottom and hit Add — suggestions will fire immediately." },
+                { icon: "💬", color: "#7c3aed", bg: "#f5f3ff", title: "Ask AI anything", desc: "Use the Ask AI bar at the bottom to instantly ask anything mid-call — \"How do I respond to that?\" or \"What's a strong data point here?\" — get an expert answer in seconds." },
                 { icon: "📋", color: "#d97706", bg: "#fffbeb", title: "Copy any suggestion", desc: "Each card has a Copy button. Paste it into your notes or use it as a script for what to say next." },
               ].map((item, i) => (
                 <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", background: item.bg, border: "1px solid #f3f4f6", borderRadius: 10, padding: "14px 16px" }}>
