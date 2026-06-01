@@ -684,9 +684,9 @@ function Onboarding({ onComplete }) {
             <textarea
               value={profile.writingSample || ""}
               onChange={e => update("writingSample", e.target.value)}
-              placeholder={"e.g. "Quick update on the May results — the numbers are pretty clear that UK spend isn't delivering incremental return. My recommendation is we pause it and reallocate before June locks in.""}
+              placeholder="e.g. Quick update on the May results — the numbers are pretty clear that UK spend is not delivering incremental return. My recommendation is we pause it and reallocate before June locks in."
               rows={5}
-              style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 10, color: "#1E1033", padding: "14px 16px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "vertical", lineHeight: 1.6 }}
+              style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 10, color: "#1E1033", padding: "14px 16px", fontSize: 14, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "vertical", lineHeight: 1.7 }}
             />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>
