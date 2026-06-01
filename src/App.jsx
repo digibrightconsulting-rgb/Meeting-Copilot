@@ -399,10 +399,10 @@ function SuggestionCard({ item, index, showNote }) {
 
 function Field({ label, value, onChange, placeholder, multiline, rows = 3 }) {
   const [local, setLocal] = useState(value);
-  const base = { width: "100%", background: "white", border: "1px solid #d1d5db", borderRadius: 8, color: "#1f2937", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'DM Sans', sans-serif", marginTop: 5 };
+  const base = { width: "100%", background: "white", border: "1px solid #d1d5db", borderRadius: 9, color: "#1f2937", padding: "11px 14px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6 };
   return (
-    <div style={{ marginBottom: 15 }}>
-      <label style={{ fontSize: 11, color: "#6b7280", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</label>
+    <div style={{ marginBottom: 18 }}>
+      <label style={{ fontSize: 12, color: "#6b7280", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</label>
       {multiline
         ? <textarea value={local} onChange={e => setLocal(e.target.value)} onBlur={() => onChange(local)} placeholder={placeholder} rows={rows} style={{ ...base, resize: "vertical" }} />
         : <input value={local} onChange={e => setLocal(e.target.value)} onBlur={() => onChange(local)} placeholder={placeholder} style={base} />}
@@ -494,8 +494,8 @@ function Onboarding({ onComplete }) {
       <button onClick={onNext || (() => setStep(s => s + 1))} disabled={disabled ?? !canNext()} style={{
         background: (disabled ?? !canNext()) ? "#F5F3FF" : "#6D28D9",
         color: (disabled ?? !canNext()) ? "#C4B5FD" : "white",
-        border: "none", borderRadius: 10, padding: "12px 28px",
-        fontSize: 14, fontWeight: 600, cursor: (disabled ?? !canNext()) ? "not-allowed" : "pointer",
+        border: "none", borderRadius: 10, padding: "14px 32px",
+        fontSize: 16, fontWeight: 600, cursor: (disabled ?? !canNext()) ? "not-allowed" : "pointer",
         fontFamily: "'Plus Jakarta Sans', sans-serif", boxShadow: (disabled ?? !canNext()) ? "none" : "0 2px 8px rgba(109,40,217,0.3)",
         transition: "all 0.15s",
       }}>{nextLabel}</button>
@@ -513,11 +513,11 @@ function Onboarding({ onComplete }) {
         input::placeholder,textarea::placeholder{color:#9ca3af}
       `}</style>
 
-      <div style={{ width: "100%", maxWidth: 560 }}>
+      <div style={{ width: "100%", maxWidth: 640 }}>
 
         {/* Step 0 — Welcome */}
         {step === 0 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ width: 64, height: 64, background: "#3B0764", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 20px rgba(59,7,100,0.35)" }}>⚡</div>
@@ -543,10 +543,10 @@ function Onboarding({ onComplete }) {
 
         {/* Step 1 — Name & Role */}
         {step === 1 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
-            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Tell us about yourself</h2>
-            <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 13 }}>This helps Unmute tailor every suggestion to your specific role on video calls.</p>
+            <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Tell us about yourself</h2>
+            <p style={{ margin: "0 0 24px", color: "#6b7280", fontSize: 15 }}>This helps Unmute tailor every suggestion to your specific role on video calls.</p>
             <Field label="Your Name *" value={profile.name} onChange={v => update("name", v)} placeholder="e.g. John" />
             <Field label="Your Job Title / Role *" value={profile.role} onChange={v => update("role", v)} placeholder="e.g. Paid Media & Marketing Measurement Analyst" />
             <NavButtons />
@@ -555,18 +555,18 @@ function Onboarding({ onComplete }) {
 
         {/* Step 2 — Role Type */}
         {step === 2 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What best describes your role?</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>We'll pre-load the most relevant skills for your role — so your video call suggestions are always on point.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 14 }}>We'll pre-load the most relevant skills for your role — so your video call suggestions are always on point.</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
               {ROLE_PACKS.map(pack => (
                 <button key={pack.id} onClick={() => selectRolePack(pack)} style={{
                   background: selectedRole === pack.id ? "#f0fdf4" : "#f9fafb",
                   color: selectedRole === pack.id ? "#15803d" : "#374151",
                   border: selectedRole === pack.id ? "2px solid #16a34a" : "2px solid #e5e7eb",
-                  borderRadius: 12, padding: "14px 16px", fontSize: 13,
-                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  borderRadius: 12, padding: "16px 18px", fontSize: 14,
+                  fontSize: "14px", fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontWeight: selectedRole === pack.id ? 700 : 500,
                   display: "flex", alignItems: "center", gap: 10,
                   textAlign: "left", transition: "all 0.15s",
@@ -588,10 +588,10 @@ function Onboarding({ onComplete }) {
 
         {/* Step 3 — Expertise */}
         {step === 3 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>Your areas of expertise</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>We've pre-selected skills based on your role — add or remove anything to match your expertise.</p>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 14 }}>We've pre-selected skills based on your role — add or remove anything to match your expertise.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
               {ALL_SKILLS.map(skill => (
                 <button key={skill} onClick={() => toggleSkill(skill)} style={{
@@ -618,46 +618,46 @@ function Onboarding({ onComplete }) {
 
         {/* Step 4 — Professional Profile */}
         {step === 4 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
-            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Tell us about your work</h2>
-            <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 13 }}>The more context you give, the more personalised your suggestions will be. All fields optional but highly recommended.</p>
+            <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Tell us about your work</h2>
+            <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 14 }}>The more context you give, the more personalised your suggestions will be. All fields optional but highly recommended.</p>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Company / Organisation</label>
-              <input value={profile.company || ""} onChange={e => update("company", e.target.value)} placeholder="e.g. Digibright Consulting" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5 }} />
+              <label style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Company / Organisation</label>
+              <input value={profile.company || ""} onChange={e => update("company", e.target.value)} placeholder="e.g. Digibright Consulting" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "11px 14px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6 }} />
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>What do you do day to day?</label>
-              <textarea value={profile.jobContext || ""} onChange={e => update("jobContext", e.target.value)} placeholder="e.g. I manage paid media campaigns across Meta and Google, run incrementality tests, and report MMM results to senior stakeholders and clients." rows={3} style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5, resize: "vertical" }} />
+              <label style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>What do you do day to day?</label>
+              <textarea value={profile.jobContext || ""} onChange={e => update("jobContext", e.target.value)} placeholder="e.g. I manage paid media campaigns across Meta and Google, run incrementality tests, and report MMM results to senior stakeholders and clients." rows={3} style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "11px 14px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6, resize: "vertical" }} />
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>What are you typically trying to achieve in meetings?</label>
-              <textarea value={profile.meetingObjective || ""} onChange={e => update("meetingObjective", e.target.value)} placeholder="e.g. Get budget approved, defend measurement strategy, influence senior stakeholders, present campaign results." rows={2} style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5, resize: "vertical" }} />
+              <label style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>What are you typically trying to achieve in meetings?</label>
+              <textarea value={profile.meetingObjective || ""} onChange={e => update("meetingObjective", e.target.value)} placeholder="e.g. Get budget approved, defend measurement strategy, influence senior stakeholders, present campaign results." rows={2} style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "11px 14px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6, resize: "vertical" }} />
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Who do you typically meet with?</label>
-              <input value={profile.typicalAudience || ""} onChange={e => update("typicalAudience", e.target.value)} placeholder="e.g. CMO, CFO, clients, cross-functional teams, agency partners" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 5 }} />
+              <label style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Who do you typically meet with?</label>
+              <input value={profile.typicalAudience || ""} onChange={e => update("typicalAudience", e.target.value)} placeholder="e.g. CMO, CFO, clients, cross-functional teams, agency partners" style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "11px 14px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", marginTop: 6 }} />
             </div>
 
             <div style={{ marginTop: 18 }}>
-              <label style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, display: "block", marginBottom: 10 }}>How do you want to come across in meetings?</label>
+              <label style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, display: "block", marginBottom: 10 }}>How do you want to come across in meetings?</label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {COMMUNICATION_STYLES.map(style => (
                   <button key={style.id} onClick={() => update("communicationStyle", style.id)} style={{
                     background: profile.communicationStyle === style.id ? "#F5F3FF" : "white",
                     border: profile.communicationStyle === style.id ? "2px solid #6D28D9" : "2px solid #E4DCFB",
-                    borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                    borderRadius: 10, padding: "14px 14px", cursor: "pointer",
                     textAlign: "left", transition: "all 0.15s",
                     display: "flex", alignItems: "flex-start", gap: 8,
                   }}>
                     <span style={{ fontSize: 16, flexShrink: 0 }}>{style.icon}</span>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: profile.communicationStyle === style.id ? "#5B21B6" : "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.label}</div>
-                      <div style={{ fontSize: 11, color: "#9B8FC0", lineHeight: 1.4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.desc}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: profile.communicationStyle === style.id ? "#5B21B6" : "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.label}</div>
+                      <div style={{ fontSize: 13, color: "#9B8FC0", lineHeight: 1.4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.desc}</div>
                     </div>
                   </button>
                 ))}
@@ -676,17 +676,17 @@ function Onboarding({ onComplete }) {
 
         {/* Step 5 — Your Voice / Writing Sample */}
         {step === 5 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
-            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Your voice</h2>
-            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13, lineHeight: 1.6 }}>Paste 2-3 sentences you've actually written at work — an email, a Slack message, a report. Unmute will match your natural style in every suggestion.</p>
+            <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Your voice</h2>
+            <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 15, lineHeight: 1.6 }}>Paste 2-3 sentences you've actually written at work — an email, a Slack message, a report. Unmute will match your natural style in every suggestion.</p>
 
             <textarea
               value={profile.writingSample || ""}
               onChange={e => update("writingSample", e.target.value)}
               placeholder={"e.g. "Quick update on the May results — the numbers are pretty clear that UK spend isn't delivering incremental return. My recommendation is we pause it and reallocate before June locks in.""}
               rows={5}
-              style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 10, color: "#1E1033", padding: "12px 14px", fontSize: 13, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "vertical", lineHeight: 1.6 }}
+              style={{ width: "100%", background: "white", border: "1px solid #DDD6FE", borderRadius: 10, color: "#1E1033", padding: "14px 16px", fontSize: 15, outline: "none", fontFamily: "'Plus Jakarta Sans', sans-serif", resize: "vertical", lineHeight: 1.6 }}
             />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 14 }}>
@@ -721,7 +721,7 @@ function Onboarding({ onComplete }) {
 
         {/* Step 6 — Meeting Type */}
         {step === 6 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What type of meetings do you mostly attend?</h2>
             <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>This tells Unmute what type of video calls you attend most so suggestions are always relevant.</p>
@@ -738,7 +738,7 @@ function Onboarding({ onComplete }) {
 
         {/* Step 7 — Language */}
         {step === 7 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>What language are your meetings in?</h2>
             <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 13 }}>On international video calls? Unmute listens in your meeting language and delivers all suggestions in English.</p>
@@ -759,7 +759,7 @@ function Onboarding({ onComplete }) {
 
         {/* Step 8 — Tutorial */}
         {step === 8 && (
-          <div key={step} style={{ background: "white", borderRadius: 16, padding: "36px 40px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 560, animation: "slideIn 0.3s ease" }}>
+          <div key={step} style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
             <Progress step={step} total={totalSteps} />
             <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 700, color: "#111827" }}>How it works</h2>
             <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 13 }}>A quick guide before you jump in.</p>
@@ -773,8 +773,8 @@ function Onboarding({ onComplete }) {
                 <div key={i} style={{ display: "flex", gap: 14, alignItems: "flex-start", background: item.bg, border: "1px solid #f3f4f6", borderRadius: 10, padding: "14px 16px" }}>
                   <div style={{ width: 34, height: 34, borderRadius: 8, background: item.color, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{item.icon}</div>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "#111827", marginBottom: 3 }}>{item.title}</div>
-                    <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6 }}>{item.desc}</div>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginBottom: 4 }}>{item.title}</div>
+                    <div style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.6 }}>{item.desc}</div>
                   </div>
                 </div>
               ))}
@@ -787,7 +787,7 @@ function Onboarding({ onComplete }) {
                   onChange={e => setConsentGiven(e.target.checked)}
                   style={{ marginTop: 2, width: 16, height: 16, accentColor: "#16a34a", flexShrink: 0 }}
                 />
-                <span style={{ fontSize: 12, color: "#374151", lineHeight: 1.6 }}>
+                <span style={{ fontSize: 14, color: "#374151", lineHeight: 1.6 }}>
                   I understand that Unmute listens to my meeting audio in real time to generate suggestions. <strong>Audio is never recorded or stored.</strong> I am responsible for ensuring compliance with local recording consent laws in my jurisdiction, and for informing meeting participants where required. I have read and agree to the <a href="https://meetunmute.com/terms" target="_blank" style={{ color: "#16a34a" }}>Terms of Service</a> and <a href="https://meetunmute.com/privacy" target="_blank" style={{ color: "#16a34a" }}>Privacy Policy</a>.
                 </span>
               </label>
@@ -1300,7 +1300,7 @@ function MeetingApp({ profile, onEditProfile }) {
       {mode === "live" && (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div style={{ background: "#F5F3FF", borderBottom: "1px solid #DDD6FE", padding: "9px 22px", display: "flex", gap: 12, alignItems: "center", flexShrink: 0 }}>
-            <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" }}>Goal</span>
+            <span style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" }}>Goal</span>
             <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
             {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
           </div>
@@ -1345,7 +1345,7 @@ function MeetingApp({ profile, onEditProfile }) {
             <div style={{ padding: "10px 22px", display: "flex", gap: 10, alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                 <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#6D28D9" }} />
-                <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Ask AI</span>
+                <span style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Ask AI</span>
               </div>
               <input
                 value={chatInput}
