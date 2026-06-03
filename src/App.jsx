@@ -450,7 +450,7 @@ function Onboarding({ onComplete }) {
         )}
 
         {/* Step 6 — Meeting Type */}
-        {step === 7 && (
+        {step === 6 && (
           <Card>
             <Progress />
             <H2>What type of calls do you attend most?</H2>
