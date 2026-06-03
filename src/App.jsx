@@ -276,7 +276,7 @@ function Onboarding({ onComplete }) {
   const finish = () => {
     localStorage.setItem("unmute_mkt_profile", JSON.stringify(profile));
     localStorage.setItem("unmute_mkt_onboarded", "true");
-    onComplete(profile);
+    window.location.reload();
   };
 
   const Progress = () => {
@@ -302,7 +302,7 @@ function Onboarding({ onComplete }) {
   );
 
   const Card = ({ children }) => (
-    <div style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640, animation: "slideIn 0.3s ease" }}>
+    <div style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640 }}>
       {children}
     </div>
   );
