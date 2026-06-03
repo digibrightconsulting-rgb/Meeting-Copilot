@@ -274,9 +274,14 @@ function Onboarding({ onComplete }) {
   };
 
   const finish = () => {
-    localStorage.setItem("unmute_mkt_profile", JSON.stringify(profile));
-    localStorage.setItem("unmute_mkt_onboarded", "true");
-    window.location.reload();
+    try {
+      const profileStr = JSON.stringify(profile);
+      localStorage.setItem("unmute_mkt_profile", profileStr);
+      localStorage.setItem("unmute_mkt_onboarded", "true");
+    } catch(e) {
+      console.error("Storage error:", e);
+    }
+    window.location.href = window.location.href;
   };
 
   const Progress = () => {
