@@ -21,6 +21,94 @@ async function callClaude(prompt) {
   return (data.content?.find(b => b.type === "text")?.text || "[]").replace(/```json|```/g, "").trim();
 }
 
+
+// ── SUPABASE CONFIG ────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://xjpqnyonanfkyniygsrh.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_1k0xyVXKU7sQl9iW-Byo4Q_W10QDxVH";
+
+async function supabaseRequest(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      ...options.headers,
+    },
+  });
+  return res.json();
+}
+
+async function signInWithGoogle() {
+  const redirectUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin + "?auth=callback")}&scopes=${encodeURIComponent("openid email profile https://www.googleapis.com/auth/calendar.readonly")}`;
+  window.location.href = redirectUrl;
+}
+
+async function signOut() {
+  const token = localStorage.getItem("unmute_access_token");
+  if (token) {
+    await supabaseRequest("/auth/v1/logout", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+  }
+  localStorage.removeItem("unmute_access_token");
+  localStorage.removeItem("unmute_refresh_token");
+  localStorage.removeItem("unmute_user");
+  localStorage.removeItem("unmute_mkt_onboarded");
+  localStorage.removeItem("unmute_mkt_profile");
+  window.location.reload();
+}
+
+async function getSession() {
+  const token = localStorage.getItem("unmute_access_token");
+  if (!token) return null;
+  try {
+    const data = await supabaseRequest("/auth/v1/user", {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    if (data.id) return { user: data, access_token: token };
+    return null;
+  } catch { return null; }
+}
+
+async function handleAuthCallback() {
+  const hash = window.location.hash;
+  if (!hash) return null;
+  const params = new URLSearchParams(hash.substring(1));
+  const accessToken = params.get("access_token");
+  const refreshToken = params.get("refresh_token");
+  if (accessToken) {
+    localStorage.setItem("unmute_access_token", accessToken);
+    if (refreshToken) localStorage.setItem("unmute_refresh_token", refreshToken);
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return accessToken;
+  }
+  return null;
+}
+
+async function saveProfile(userId, profile) {
+  try {
+    await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upsert_profile", userId, profile }),
+    });
+  } catch(e) { console.error("Save profile error:", e); }
+}
+
+async function fetchCalendar(accessToken) {
+  try {
+    const res = await fetch("/api/calendar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessToken }),
+    });
+    const data = await res.json();
+    return data.events || [];
+  } catch(e) { console.error("Calendar error:", e); return []; }
+}
+
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const LANGUAGES = [
   { label: "English", code: "en-US", flag: "🇬🇧" },
@@ -522,31 +610,105 @@ function Onboarding({ onComplete }) {
   );
 }
 
+
+// ── AUTH SCREEN ────────────────────────────────────────────────────────────
+function AuthScreen() {
+  const [loading, setLoading] = useState(false);
+
+  return (
+    <div style={{ height: "100vh", background: "linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 60%, #E0D9F5 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        *{box-sizing:border-box}
+      `}</style>
+      <div style={{ background: "white", borderRadius: 20, padding: "48px", maxWidth: 440, width: "100%", textAlign: "center", boxShadow: "0 8px 40px rgba(109,40,217,0.12)", animation: "slideIn 0.3s ease" }}>
+        <div style={{ width: 64, height: 64, background: "#3B0764", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 20px rgba(59,7,100,0.35)" }}>📣</div>
+        <h1 style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 28, fontWeight: 900, color: "#3B0764", margin: "0 0 8px", letterSpacing: "-0.02em" }}>Unmute</h1>
+        <p style={{ color: "#9B8FC0", fontSize: 13, margin: "0 0 8px", fontStyle: "italic" }}>for Marketers</p>
+        <p style={{ color: "#6b7280", fontSize: 14, lineHeight: 1.6, margin: "0 0 32px" }}>Your AI co-pilot for every Zoom, Meet, and Teams call. Real-time talking points tailored to your marketing role.</p>
+
+        <button
+          onClick={() => { setLoading(true); signInWithGoogle(); }}
+          disabled={loading}
+          style={{ width: "100%", background: loading ? "#F5F3FF" : "white", border: "1.5px solid #DDD6FE", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, color: "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.15s", marginBottom: 16 }}
+        >
+          {loading ? (
+            <div style={{ width: 20, height: 20, border: "2px solid #6D28D9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          )}
+          {loading ? "Redirecting…" : "Continue with Google"}
+        </button>
+
+        <p style={{ fontSize: 11, color: "#C4B5FD", lineHeight: 1.6 }}>
+          By continuing you agree to our <a href="https://meetunmute.com/terms.html" target="_blank" style={{ color: "#6D28D9" }}>Terms</a> and <a href="https://meetunmute.com/privacy.html" target="_blank" style={{ color: "#6D28D9" }}>Privacy Policy</a>. Audio is never recorded or stored.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
+  const [user, setUser] = useState(null);
   const [onboarded, setOnboarded] = useState(false);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const done = localStorage.getItem("unmute_mkt_onboarded");
-    const saved = localStorage.getItem("unmute_mkt_profile");
-    if (done && saved) { try { setProfile(JSON.parse(saved)); setOnboarded(true); } catch {} }
-    setReady(true);
+    async function init() {
+      // Handle OAuth callback
+      await handleAuthCallback();
+
+      // Check session
+      const session = await getSession();
+      if (session) {
+        setUser(session.user);
+        // Load profile from localStorage first for speed
+        const saved = localStorage.getItem("unmute_mkt_profile");
+        const done = localStorage.getItem("unmute_mkt_onboarded");
+        if (done && saved) {
+          try { setProfile(JSON.parse(saved)); setOnboarded(true); } catch {}
+        }
+      }
+      setReady(true);
+    }
+    init();
   }, []);
 
-  if (!ready) return null;
-  if (!onboarded) return <Onboarding onComplete={p => { setProfile(p); setOnboarded(true); }} />;
-  return <MeetingApp profile={profile} onEditProfile={() => { localStorage.removeItem("unmute_mkt_onboarded"); window.location.reload(); }} />;
+  const handleOnboardingComplete = async (p) => {
+    localStorage.setItem("unmute_mkt_profile", JSON.stringify(p));
+    localStorage.setItem("unmute_mkt_onboarded", "true");
+    if (user) await saveProfile(user.id, p);
+    window.location.reload();
+  };
+
+  if (!ready) return (
+    <div style={{ height: "100vh", background: "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ width: 40, height: 40, border: "3px solid #6D28D9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto 16px" }} />
+        <p style={{ color: "#9B8FC0", fontFamily: "monospace", fontSize: 13 }}>Loading Unmute…</p>
+      </div>
+    </div>
+  );
+
+  if (!user) return <AuthScreen />;
+  if (!onboarded) return <Onboarding onComplete={handleOnboardingComplete} />;
+  return <MeetingApp profile={profile} user={user} onEditProfile={() => { localStorage.removeItem("unmute_mkt_onboarded"); window.location.reload(); }} />;
 }
 
 // ── MEETING APP ────────────────────────────────────────────────────────────
-function MeetingApp({ profile, onEditProfile }) {
+function MeetingApp({ profile, user, onEditProfile }) {
   const [mode, setMode] = useState("prep");
   const [language, setLanguage] = useState(profile.language || LANGUAGES[0]);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [sessionConsentGiven, setSessionConsentGiven] = useState(false);
+  const [calendarEvents, setCalendarEvents] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   const [prepTopic, setPrepTopic] = useState("");
   const [prepAttendees, setPrepAttendees] = useState("");
@@ -603,6 +765,22 @@ function MeetingApp({ profile, onEditProfile }) {
 
   const loadMeeting = (m) => { setPrepTopic(m.topic); setPrepAttendees(m.attendees); setPrepGoal(m.goal); setPrepConcerns(m.concerns); setPrepData(m.data); setShowPlanner(false); };
   const deleteMeeting = (id) => { const u = savedMeetings.filter(m => m.id !== id); setSavedMeetings(u); localStorage.setItem("unmute_mkt_meetings", JSON.stringify(u)); };
+
+  const loadCalendarEvents = async () => {
+    const token = localStorage.getItem("unmute_access_token");
+    if (!token) return;
+    setCalendarLoading(true);
+    const events = await fetchCalendar(token);
+    setCalendarEvents(events);
+    setCalendarLoading(false);
+    setShowCalendar(true);
+  };
+
+  const loadEventToPrep = (event) => {
+    setPrepTopic(event.title);
+    setPrepAttendees(event.attendees || "");
+    setShowCalendar(false);
+  };
 
   const fetchLiveSuggestions = useCallback(async () => {
     const recent = transcriptRef.current.slice(-15).map(t => t.text).join(" ");
@@ -729,6 +907,7 @@ function MeetingApp({ profile, onEditProfile }) {
           )}
         </div>
         <button onClick={onEditProfile} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Edit Profile</button>
+        <button onClick={signOut} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(196,181,253,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 11 }}>Sign out</button>
         {mode === "live" && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={clearSession} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Clear</button>
@@ -765,6 +944,40 @@ function MeetingApp({ profile, onEditProfile }) {
                 </div>
               )}
             </div>
+            {/* Google Calendar sync */}
+            <div style={{ marginBottom: 16 }}>
+              <button onClick={loadCalendarEvents} disabled={calendarLoading} style={{ width: "100%", background: showCalendar ? "#EDE9FE" : "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#5B21B6", fontSize: 13, fontWeight: 600 }}>
+                <span>📅</span>
+                <span>{calendarLoading ? "Loading calendar…" : "Today's Meetings"}</span>
+                {calendarLoading && <div style={{ width: 12, height: 12, border: "2px solid #6D28D9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", marginLeft: 4 }} />}
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#9B8FC0" }}>{showCalendar ? "▲" : "▼"}</span>
+              </button>
+              {showCalendar && (
+                <div style={{ border: "1px solid #DDD6FE", borderTop: "none", borderRadius: "0 0 10px 10px", overflow: "hidden" }}>
+                  {calendarEvents.length === 0 ? (
+                    <div style={{ padding: "16px 14px", textAlign: "center", color: "#C4B5FD", fontSize: 12, fontStyle: "italic" }}>
+                      No meetings found for today.
+                    </div>
+                  ) : calendarEvents.map((event, i) => {
+                    const time = event.start ? new Date(event.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+                    return (
+                      <div key={event.id} style={{ padding: "10px 14px", borderBottom: i < calendarEvents.length - 1 ? "1px solid #F5F3FF" : "none", display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ flexShrink: 0, textAlign: "center", minWidth: 44 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#6D28D9", fontFamily: "monospace" }}>{time}</div>
+                          {event.isOnline && <div style={{ fontSize: 9, color: "#10B981", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>online</div>}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#3B0764", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.title}</div>
+                          {event.attendees && <div style={{ fontSize: 11, color: "#9B8FC0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.attendees}</div>}
+                        </div>
+                        <button onClick={() => loadEventToPrep(event)} style={{ background: "#6D28D9", border: "none", color: "white", borderRadius: 6, padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>→ Prep</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div style={{ marginBottom: 20 }}>
               <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Meeting Brief Builder</h2>
               <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Generate a personalised brief — includes an Industry Pulse with the latest marketing trends relevant to your meeting.</p>
