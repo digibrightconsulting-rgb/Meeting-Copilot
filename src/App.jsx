@@ -40,7 +40,10 @@ async function supabaseRequest(path, options = {}) {
 }
 
 async function signInWithGoogle() {
-  const redirectUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin + "?auth=callback")}&scopes=${encodeURIComponent("openid email profile https://www.googleapis.com/auth/calendar.readonly")}`;
+  const redirectTo = window.location.hostname === "localhost"
+    ? "http://localhost:3000"
+    : "https://app.meetunmute.com";
+  const redirectUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&scopes=${encodeURIComponent("openid email profile https://www.googleapis.com/auth/calendar.readonly")}`;
   window.location.href = redirectUrl;
 }
 
