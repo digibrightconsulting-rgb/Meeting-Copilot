@@ -15,10 +15,44 @@ async function callClaude(prompt) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200, messages: [{ role: "user", content: prompt }] }),
   });
   const data = await res.json();
   return (data.content?.find(b => b.type === "text")?.text || "[]").replace(/```json|```/g, "").trim();
+}
+
+// Higher token limit for summaries (long transcripts need room)
+async function callClaudeLong(prompt) {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+  });
+  const data = await res.json();
+  return (data.content?.find(b => b.type === "text")?.text || "{}").replace(/```json|```/g, "").trim();
+}
+
+// Resilient JSON parse — tolerates truncated responses by repairing/extracting
+function safeParse(raw) {
+  try { return JSON.parse(raw); } catch (e) {}
+  // Try to extract the largest valid JSON object/array substring
+  const firstBrace = raw.search(/[\{\[]/);
+  if (firstBrace === -1) throw new Error("No JSON found");
+  let sliced = raw.slice(firstBrace);
+  // Attempt to close common truncations by trimming to last complete element
+  for (let end = sliced.length; end > 0; end--) {
+    const candidate = sliced.slice(0, end);
+    try { return JSON.parse(candidate); } catch (e) {}
+    // Try closing dangling brackets/braces
+    const opens = (candidate.match(/[\{\[]/g) || []).length;
+    const closes = (candidate.match(/[\}\]]/g) || []).length;
+    if (opens > closes) {
+      let repaired = candidate.replace(/,\s*$/, "");
+      repaired += "]}".repeat(1);
+      try { return JSON.parse(repaired); } catch (e) {}
+    }
+  }
+  throw new Error("Could not parse JSON");
 }
 
 
@@ -340,11 +374,28 @@ function Field({ label, value, onChange, placeholder, multiline, rows = 3 }) {
   );
 }
 
+// Isolated skill input so typing doesn't re-render the whole onboarding tree
+function SkillAdder({ onAdd }) {
+  const [val, setVal] = useState("");
+  const add = () => { const t = val.trim(); if (!t) return; onAdd(t); setVal(""); };
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <input
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        placeholder="Add your own skill…"
+        style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}
+      />
+      <button onClick={add} style={{ background: "#6D28D9", color: "white", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Add</button>
+    </div>
+  );
+}
+
 // ── ONBOARDING ─────────────────────────────────────────────────────────────
 function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
-  const [customSkill, setCustomSkill] = useState("");
   const [consentGiven, setConsentGiven] = useState(false);
   const totalSteps = 8;
 
@@ -352,7 +403,6 @@ function Onboarding({ onComplete }) {
 
   const togglePlatform = (id) => setProfile(p => ({ ...p, platforms: p.platforms.includes(id) ? p.platforms.filter(x => x !== id) : [...p.platforms, id] }));
   const toggleSkill = (skill) => setProfile(p => ({ ...p, expertise: p.expertise.includes(skill) ? p.expertise.filter(s => s !== skill) : [...p.expertise, skill] }));
-  const addCustomSkill = () => { if (!customSkill.trim() || profile.expertise.includes(customSkill.trim())) return; setProfile(p => ({ ...p, expertise: [...p.expertise, customSkill.trim()] })); setCustomSkill(""); };
 
   const selectRole = (r) => setProfile(p => ({ ...p, roleId: r.id, role: r.label, expertise: [...r.skills] }));
 
@@ -503,10 +553,7 @@ function Onboarding({ onComplete }) {
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input value={customSkill} onChange={e => setCustomSkill(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addCustomSkill(); }} placeholder="Add your own skill…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
-              <button onClick={addCustomSkill} style={{ background: "#6D28D9", color: "white", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Add</button>
-            </div>
+            <SkillAdder onAdd={(skill) => { if (!profile.expertise.includes(skill)) setProfile(p => ({ ...p, expertise: [...p.expertise, skill] })); }} />
             {profile.expertise.length > 0 && <p style={{ margin: "10px 0 0", fontSize: 12, color: "#6D28D9", fontFamily: "monospace" }}>✓ {profile.expertise.length} skills selected</p>}
             <NavButtons />
           </Card>
@@ -752,7 +799,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     setPrepLoading(true); setPrepError("");
     try {
       const raw = await callClaude(buildPrepPrompt(profile, prepTopic, prepAttendees, prepGoal, prepConcerns, prepData));
-      setPrepPoints(JSON.parse(raw));
+      setPrepPoints(safeParse(raw));
       if (prepGoal) setSessionGoal(prepGoal);
     } catch (e) { setPrepError("Error generating brief. Try again."); console.error(e); }
     setPrepLoading(false);
@@ -820,16 +867,16 @@ function MeetingApp({ profile, user, onEditProfile }) {
     setIsListening(false); setLiveStatus("idle");
     if (transcriptRef.current.length > 0) {
       setMode("summary"); setSummary(null); setSummaryLoading(true); setSummaryError("");
-      callClaude(buildSummaryPrompt(profile, transcriptRef.current, sessionGoal, prepTopic, prepAttendees))
-        .then(raw => { setSummary(JSON.parse(raw.replace(/```json|```/g, "").trim())); setSummaryLoading(false); })
-        .catch(e => { console.error(e); setSummaryError("Error generating summary."); setSummaryLoading(false); });
+      callClaudeLong(buildSummaryPrompt(profile, transcriptRef.current, sessionGoal, prepTopic, prepAttendees))
+        .then(raw => { setSummary(safeParse(raw)); setSummaryLoading(false); })
+        .catch(e => { console.error(e); setSummaryError("Error generating summary. Please try again."); setSummaryLoading(false); });
     }
   }, [profile, sessionGoal, prepTopic, prepAttendees]);
 
   const generateSummary = async () => {
     if (transcript.length === 0) { setSummaryError("No transcript yet — run a live session first."); return; }
     setSummaryLoading(true); setSummaryError("");
-    try { const raw = await callClaude(buildSummaryPrompt(profile, transcript, sessionGoal, prepTopic, prepAttendees)); setSummary(JSON.parse(raw)); } catch (e) { setSummaryError("Error generating summary."); console.error(e); }
+    try { const raw = await callClaudeLong(buildSummaryPrompt(profile, transcript, sessionGoal, prepTopic, prepAttendees)); setSummary(safeParse(raw)); } catch (e) { setSummaryError("Error generating summary. Please try again."); console.error(e); }
     setSummaryLoading(false);
   };
 
