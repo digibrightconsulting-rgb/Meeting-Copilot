@@ -290,6 +290,47 @@ Respond ONLY with a JSON array:
 ]`;
 }
 
+
+// ── BOARDROOM PROMPT — expertise radar, not talking points ─────────────────
+function buildBoardroomPrompt(profile, transcript, alreadyCovered) {
+  return `You are an expert co-pilot listening to a live meeting on behalf of one specific person. Your job is NOT to tell them what to say. Your job is to spot moments where the discussion touches THEIR area of deep expertise, and give them substance.
+
+THE PERSON YOU SERVE:
+Name: ${profile.name}
+Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
+${profile.company ? "Company: Use what you know about " + profile.company + " — their product, industry, business model, and likely priorities." : ""}
+Deep expertise: ${profile.expertise.join(", ")}
+${profile.platforms && profile.platforms.length ? "Platforms/tools they work with daily: " + profile.platforms.join(", ") : ""}
+${profile.jobContext ? "What they actually do: " + profile.jobContext : ""}
+
+RECENT CONVERSATION (verbatim):
+"${transcript}"
+
+${alreadyCovered && alreadyCovered.length ? `ALREADY SURFACED (do not repeat these topics): ${alreadyCovered.join(" | ")}` : ""}
+
+YOUR TASK:
+Scan the conversation for specific things that intersect with this person's expertise — a technology, a proposal, an integration, a metric, a claim, a requirement, a vendor ask, a technical term. For each one that genuinely matters to them, produce a card.
+
+Card types:
+- "Explain" — a technical concept, product, or requirement was mentioned. Explain what it actually involves at a level useful to an EXPERT, not a beginner. Include concrete specifics: requirements, implications, how it works, what it typically entails.
+- "Ask" — a sharp, specific question they could put to the room that only someone with their expertise would think to ask. Must be pointed and concrete, not generic.
+- "Matters" — why what was just said has consequences for their company, their measurement, their budget, their roadmap, or their risk.
+
+ABSOLUTE RULES:
+1. Every card MUST include a "trigger" field quoting the actual words from the conversation that prompted it. If you cannot quote a real trigger, do not create the card.
+2. Only surface things inside or adjacent to their stated expertise. If the conversation is about something outside their domain, return fewer cards or an empty array.
+3. Return an EMPTY ARRAY [] if nothing in this segment genuinely touches their expertise. Silence is better than noise. Do NOT invent relevance.
+4. Write for an expert. Assume they already know the fundamentals of their own field. Give them the specific detail, not the textbook definition.
+5. Maximum 3 cards. Often 1 or 2 is correct. Often zero is correct.
+6. "text" should be 1-3 punchy sentences. Concrete over vague.
+
+Respond ONLY with a JSON array, no markdown:
+[
+  { "type": "Explain", "trigger": "exact words from the conversation", "title": "Short label", "text": "The substance." },
+  { "type": "Ask", "trigger": "exact words", "title": "Short label", "text": "The question to ask." }
+]`;
+}
+
 function buildSummaryPrompt(profile, transcript, goal, prepTopic, prepAttendees) {
   return `You are debriefing a marketing professional after a meeting.
 
@@ -756,6 +797,10 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [sessionConsentGiven, setSessionConsentGiven] = useState(false);
+  const [boardroomMode, setBoardroomMode] = useState(false);
+  const [boardroomCards, setBoardroomCards] = useState([]);
+  const [pinnedCards, setPinnedCards] = useState([]);
+  const coveredRef = useRef([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -845,10 +890,46 @@ function MeetingApp({ profile, user, onEditProfile }) {
     } catch (e) { console.error(e); setLiveStatus("error"); setLiveError("Could not fetch suggestions."); }
   }, [sessionGoal, language, prepTopic, prepGoal, profile]);
 
+  const fetchBoardroomCards = useCallback(async () => {
+    const recent = transcriptRef.current.slice(-25).map(t => t.text).join(" ");
+    if (recent.trim().length < 40) return;
+    setLiveStatus("thinking");
+    try {
+      const raw = await callClaudeFast(buildBoardroomPrompt(profile, recent, coveredRef.current.slice(-8)));
+      const cards = safeParse(raw);
+      if (Array.isArray(cards) && cards.length > 0) {
+        const stamped = cards.map(c => ({ ...c, id: Date.now() + Math.random(), at: new Date() }));
+        coveredRef.current = [...coveredRef.current, ...cards.map(c => c.title)].slice(-12);
+        setBoardroomCards(prev => [...stamped, ...prev].slice(0, 20));
+      }
+      setLastUpdated(new Date());
+      setLiveStatus("listening");
+    } catch (e) { console.error(e); setLiveStatus("listening"); }
+  }, [profile]);
+
   const triggerDebounced = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(fetchLiveSuggestions, 18000);
-  }, [fetchLiveSuggestions]);
+    debounceRef.current = setTimeout(() => {
+      if (boardroomMode) fetchBoardroomCards(); else fetchLiveSuggestions();
+    }, boardroomMode ? 9000 : 12000);
+  }, [fetchLiveSuggestions, fetchBoardroomCards, boardroomMode]);
+
+  const pauseListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setIsListening(false);
+    setLiveStatus("idle");
+  };
+
+  const togglePin = (card) => {
+    setPinnedCards(prev => prev.some(p => p.id === card.id)
+      ? prev.filter(p => p.id !== card.id)
+      : [card, ...prev]);
+  };
 
   const startListening = useCallback(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -898,6 +979,97 @@ function MeetingApp({ profile, user, onEditProfile }) {
 
   const clearSession = () => { setTranscript([]); setLiveSuggestions([]); setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
   const statusInfo = { idle: { color: "#9ca3af", label: "Ready" }, listening: { color: "#16a34a", label: "Listening" }, thinking: { color: "#d97706", label: "Analysing…" }, error: { color: "#dc2626", label: "Error" } };
+
+  // ── BOARDROOM MODE — full screen, minimal, mobile-first ──────────────────
+  if (boardroomMode) {
+    const CARD_META = {
+      Explain: { color: "#A78BFA", bg: "rgba(167,139,250,0.10)", label: "WHAT IT MEANS" },
+      Ask:     { color: "#5EEAD4", bg: "rgba(94,234,212,0.10)",  label: "ASK THIS" },
+      Matters: { color: "#FCD34D", bg: "rgba(252,211,77,0.10)",  label: "WHY IT MATTERS" },
+    };
+    const allCards = [...pinnedCards.map(c => ({ ...c, pinned: true })), ...boardroomCards.filter(c => !pinnedCards.some(p => p.id === c.id))];
+
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "#0F0518", color: "white", fontFamily: "'Plus Jakarta Sans', sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+          @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+          @keyframes spin{to{transform:rotate(360deg)}}
+          @keyframes cardIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+          ::-webkit-scrollbar{width:0;display:none}
+        `}</style>
+
+        {/* Minimal bar */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
+          <div style={{ width: 9, height: 9, borderRadius: "50%", background: isListening ? (liveStatus === "thinking" ? "#FCD34D" : "#4ADE80") : "#6B7280", animation: isListening ? "pulse 2s infinite" : "none", flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontFamily: "monospace", letterSpacing: "0.06em" }}>
+            {isListening ? (liveStatus === "thinking" ? "THINKING" : "LISTENING") : "PAUSED"}
+          </span>
+          <button
+            onClick={() => { if (isListening) { pauseListening(); } else if (sessionConsentGiven) { startListening(); } else { setShowConsentModal(true); } }}
+            style={{ marginLeft: "auto", background: isListening ? "rgba(255,255,255,0.07)" : "#6D28D9", border: "none", color: "white", borderRadius: 20, padding: "8px 18px", fontSize: 13, fontWeight: 600 }}
+          >
+            {isListening ? "Pause" : "Start"}
+          </button>
+          <button onClick={() => fetchBoardroomCards()} style={{ background: "rgba(255,255,255,0.07)", border: "none", color: "rgba(255,255,255,0.65)", borderRadius: 20, padding: "8px 14px", fontSize: 13 }}>↻</button>
+          <button onClick={() => setBoardroomMode(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", fontSize: 20, padding: "0 4px", lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* Cards */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 28px", WebkitOverflowScrolling: "touch" }}>
+          {allCards.length === 0 && (
+            <div style={{ textAlign: "center", paddingTop: "22vh", color: "rgba(255,255,255,0.22)" }}>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>👂</div>
+              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.7, padding: "0 24px" }}>
+                {isListening
+                  ? "Listening for anything in your area of expertise…"
+                  : "Tap Start. Put the phone on the table."}
+              </p>
+            </div>
+          )}
+
+          {allCards.map((card) => {
+            const meta = CARD_META[card.type] || CARD_META.Explain;
+            const isPinned = pinnedCards.some(p => p.id === card.id);
+            return (
+              <div key={card.id} style={{ background: meta.bg, border: `1px solid ${isPinned ? meta.color : "rgba(255,255,255,0.08)"}`, borderLeft: `4px solid ${meta.color}`, borderRadius: 14, padding: "16px 16px 14px", marginBottom: 12, animation: "cardIn 0.25s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", color: meta.color, fontFamily: "monospace" }}>{meta.label}</span>
+                  <button onClick={() => togglePin(card)} style={{ marginLeft: "auto", background: "none", border: "none", fontSize: 16, opacity: isPinned ? 1 : 0.28, padding: "2px 4px", lineHeight: 1 }}>📌</button>
+                </div>
+                {card.title && <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 7, lineHeight: 1.3 }}>{card.title}</div>}
+                <p style={{ margin: 0, fontSize: 16, lineHeight: 1.55, color: "rgba(255,255,255,0.92)" }}>{card.text}</p>
+                {card.trigger && (
+                  <p style={{ margin: "11px 0 0", fontSize: 12, color: "rgba(255,255,255,0.32)", fontStyle: "italic", borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 9, lineHeight: 1.45 }}>
+                    ↳ “{card.trigger}”
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Consent modal (boardroom) */}
+        {showConsentModal && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ background: "#1A0A2E", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 18, padding: 26, maxWidth: 400, width: "100%" }}>
+              <div style={{ fontSize: 30, marginBottom: 12 }}>🎙️</div>
+              <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700 }}>Before you start</h3>
+              <p style={{ margin: "0 0 18px", fontSize: 14, color: "rgba(255,255,255,0.6)", lineHeight: 1.65 }}>
+                Audio is processed live and never recorded or stored. You are responsible for complying with local recording consent laws and informing participants where required.
+              </p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setShowConsentModal(false)} style={{ flex: 1, background: "rgba(255,255,255,0.07)", border: "none", color: "rgba(255,255,255,0.6)", borderRadius: 10, padding: 13, fontSize: 14, fontWeight: 600 }}>Cancel</button>
+                <button onClick={() => { setSessionConsentGiven(true); setShowConsentModal(false); startListening(); }} style={{ flex: 2, background: "#6D28D9", border: "none", color: "white", borderRadius: 10, padding: 13, fontSize: 14, fontWeight: 600 }}>Confirm & Start</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
 
   return (
     <div style={{ height: "100vh", background: "#F5F3FF", fontFamily: "'Plus Jakarta Sans', 'Helvetica Neue', sans-serif", color: "#1E1033", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -956,6 +1128,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
             </div>
           )}
         </div>
+        <button onClick={() => setBoardroomMode(true)} style={{ background: "#7C3AED", border: "none", color: "white", borderRadius: 8, padding: "5px 14px", fontSize: 12, fontWeight: 600 }}>📱 Boardroom</button>
         <button onClick={onEditProfile} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Edit Profile</button>
         <button onClick={signOut} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(196,181,253,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 11 }}>Sign out</button>
         {mode === "live" && (
