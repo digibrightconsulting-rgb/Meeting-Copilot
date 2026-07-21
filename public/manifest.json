@@ -1,0 +1,23 @@
+{
+  "name": "Unmute",
+  "short_name": "Unmute",
+  "description": "Your AI co-pilot for meetings.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0F0518",
+  "theme_color": "#0F0518",
+  "icons": [
+    {
+      "src": "/unmute-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/unmute-logo-120.png",
+      "sizes": "120x120",
+      "type": "image/png"
+    }
+  ]
+}
