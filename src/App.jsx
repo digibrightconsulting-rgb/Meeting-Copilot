@@ -792,7 +792,9 @@ export default function App() {
 
 // ── MEETING APP ────────────────────────────────────────────────────────────
 function MeetingApp({ profile, user, onEditProfile }) {
-  const [mode, setMode] = useState("prep");
+  const [mode, setMode] = useState("hub");
+  const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 820);
+  const shouldListenRef = useRef(false);
   const [language, setLanguage] = useState(profile.language || LANGUAGES[0]);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
@@ -835,6 +837,13 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const transcriptRef = useRef([]);
   const debounceRef = useRef(null);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 820);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => { window.removeEventListener("resize", onResize); window.removeEventListener("orientationchange", onResize); };
+  }, []);
 
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [transcript]);
@@ -915,6 +924,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
   }, [fetchLiveSuggestions, fetchBoardroomCards, boardroomMode]);
 
   const pauseListening = () => {
+    shouldListenRef.current = false;
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
       recognitionRef.current.stop();
@@ -938,11 +948,19 @@ function MeetingApp({ profile, user, onEditProfile }) {
     r.continuous = true; r.interimResults = true; r.lang = language.code;
     r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { setTranscript(prev => [...prev, { id: Date.now() + Math.random(), text: e.results[i][0].transcript.trim() }]); triggerDebounced(); } } };
     r.onerror = (e) => { if (e.error !== "no-speech") { setLiveError(`Mic: ${e.error}`); setLiveStatus("error"); } };
-    r.onend = () => { if (recognitionRef.current) r.start(); };
+    r.onend = () => {
+      // Only restart if we are genuinely still meant to be listening.
+      // Prevents a runaway restart loop (which causes repeated Android chimes).
+      if (shouldListenRef.current && recognitionRef.current === r) {
+        setTimeout(() => { try { r.start(); } catch (err) {} }, 400);
+      }
+    };
+    shouldListenRef.current = true;
     r.start(); recognitionRef.current = r; setIsListening(true); setLiveStatus("listening"); setLiveError("");
   }, [language, triggerDebounced]);
 
   const endMeeting = useCallback(() => {
+    shouldListenRef.current = false;
     if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setIsListening(false); setLiveStatus("idle");
@@ -1070,6 +1088,64 @@ function MeetingApp({ profile, user, onEditProfile }) {
     );
   }
 
+  // ── HUB — the home screen you land on ────────────────────────────────────
+  if (mode === "hub") {
+    const tiles = [
+      { key: "boardroom", icon: "📱", title: "Boardroom", desc: "Phone on the table. Live insight in your field.", primary: true, go: () => setBoardroomMode(true) },
+      { key: "prep",      icon: "📋", title: "Prep a Meeting", desc: "Build a brief before you walk in.", go: () => setMode("prep") },
+      { key: "live",      icon: "💻", title: "Desktop Live", desc: "Full split-screen view for video calls.", go: () => setMode("live") },
+      { key: "summary",   icon: "📊", title: "Last Summary", desc: summary ? "View your latest debrief." : "No debrief yet.", go: () => setMode("summary") },
+    ];
+
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #F5F3FF 0%, #EDE9FE 100%)", fontFamily: "'Plus Jakarta Sans', sans-serif", color: "#1E1033", padding: "0 0 40px" }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+          @keyframes spin{to{transform:rotate(360deg)}}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+        `}</style>
+
+        {/* Slim bar */}
+        <div style={{ background: "#3B0764", padding: "14px 18px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: "#7C3AED", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, color: "white", fontSize: 15, flexShrink: 0 }}>U</div>
+          <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, fontSize: 17, color: "white" }}>Unmute</div>
+          <button onClick={onEditProfile} style={{ marginLeft: "auto", background: "rgba(255,255,255,0.1)", border: "none", color: "rgba(255,255,255,0.8)", borderRadius: 8, padding: "7px 12px", fontSize: 12 }}>Profile</button>
+          <button onClick={signOut} style={{ background: "none", border: "none", color: "rgba(196,181,253,0.55)", fontSize: 12, padding: "7px 4px" }}>Sign out</button>
+        </div>
+
+        <div style={{ maxWidth: 620, margin: "0 auto", padding: "28px 18px 0" }}>
+          <p style={{ margin: "0 0 4px", fontSize: 13, color: "#9B8FC0", fontFamily: "monospace", letterSpacing: "0.05em" }}>
+            {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }).toUpperCase()}
+          </p>
+          <h1 style={{ margin: "0 0 4px", fontFamily: "'Fraunces', Georgia, serif", fontSize: 30, fontWeight: 900, color: "#3B0764", letterSpacing: "-0.02em" }}>
+            Hi {profile.name ? profile.name.split(" ")[0] : "there"}
+          </h1>
+          <p style={{ margin: "0 0 26px", fontSize: 14, color: "#6b7280" }}>{profile.role}{profile.company ? ` · ${profile.company}` : ""}</p>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            {tiles.map(t => (
+              <button key={t.key} onClick={t.go} style={{
+                width: "100%", textAlign: "left", cursor: "pointer",
+                background: t.primary ? "#3B0764" : "white",
+                border: t.primary ? "none" : "1px solid #DDD6FE",
+                borderRadius: 16, padding: "20px 20px",
+                display: "flex", alignItems: "center", gap: 16,
+                boxShadow: t.primary ? "0 8px 24px rgba(59,7,100,0.28)" : "0 1px 3px rgba(0,0,0,0.04)",
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
+              }}>
+                <div style={{ fontSize: 28, flexShrink: 0 }}>{t.icon}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: t.primary ? "white" : "#3B0764", marginBottom: 3 }}>{t.title}</div>
+                  <div style={{ fontSize: 13, color: t.primary ? "rgba(196,181,253,0.85)" : "#9B8FC0", lineHeight: 1.45 }}>{t.desc}</div>
+                </div>
+                <div style={{ fontSize: 20, color: t.primary ? "rgba(255,255,255,0.5)" : "#C4B5FD", flexShrink: 0 }}>›</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ height: "100vh", background: "#F5F3FF", fontFamily: "'Plus Jakarta Sans', 'Helvetica Neue', sans-serif", color: "#1E1033", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1085,24 +1161,25 @@ function MeetingApp({ profile, user, onEditProfile }) {
       `}</style>
 
       {/* Header */}
-      <div style={{ background: "#3B0764", padding: "0 22px", height: 56, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 6 }}>
+      <div style={{ background: "#3B0764", padding: isMobile ? "10px 12px" : "0 22px", minHeight: 56, display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
+        <button onClick={() => setMode("hub")} style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", borderRadius: 8, width: 34, height: 34, fontSize: 17, flexShrink: 0, lineHeight: 1 }}>‹</button>
+        <div style={{ display: isMobile ? "none" : "flex", alignItems: "center", gap: 9, marginRight: 6 }}>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: "#7C3AED", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, color: "white" }}>U</div>
           <div>
             <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, fontSize: 15, color: "white", letterSpacing: "-0.01em", lineHeight: 1.2 }}>Unmute</div>
             <div style={{ fontSize: 9, color: "rgba(196,181,253,0.8)", letterSpacing: "0.05em" }}>for Marketers</div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.1)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "rgba(196,181,253,0.9)" }}>
+        <div style={{ display: isMobile ? "none" : "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.1)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "rgba(196,181,253,0.9)" }}>
           📣 {profile.name} · {profile.role}
         </div>
-        {profile.platforms.length > 0 && (
+        {profile.platforms.length > 0 && !isMobile && (
           <div style={{ display: "flex", gap: 4 }}>
             {profile.platforms.slice(0, 4).map((p, i) => { const pl = PLATFORMS.find(x => x.label === p); return pl ? <span key={i} title={p} style={{ fontSize: 14 }}>{pl.icon}</span> : null; })}
             {profile.platforms.length > 4 && <span style={{ fontSize: 10, color: "rgba(196,181,253,0.6)", fontFamily: "monospace" }}>+{profile.platforms.length - 4}</span>}
           </div>
         )}
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.1)", borderRadius: 9, padding: 3, gap: 2, marginLeft: 8 }}>
+        <div style={{ display: "flex", background: "rgba(255,255,255,0.1)", borderRadius: 9, padding: 3, gap: 2, marginLeft: isMobile ? 0 : 8 }}>
           {[{ key: "prep", label: "Prep" }, { key: "live", label: "Live" }, { key: "summary", label: "Summary" }].map(({ key, label }) => (
             <button key={key} onClick={() => setMode(key)} style={{ background: mode === key ? "rgba(255,255,255,0.18)" : "transparent", border: "none", color: mode === key ? "white" : "rgba(196,181,253,0.7)", borderRadius: 7, padding: "5px 14px", fontSize: 12, fontWeight: mode === key ? 600 : 400, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{label}</button>
           ))}
@@ -1114,7 +1191,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
             {lastUpdated && <span style={{ fontSize: 10, color: "rgba(196,181,253,0.6)", marginLeft: 2 }}>· {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
           </div>
         )}
-        <div style={{ marginLeft: "auto", position: "relative" }}>
+        <div style={{ marginLeft: "auto", position: "relative", display: isMobile ? "none" : "block" }}>
           <button onClick={() => setShowLangMenu(p => !p)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.9)", borderRadius: 8, padding: "5px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 7 }}>
             <span>{language.flag}</span><span style={{ fontWeight: 500 }}>{language.label}</span><span style={{ fontSize: 9, color: "rgba(196,181,253,0.6)" }}>▼</span>
           </button>
@@ -1128,9 +1205,9 @@ function MeetingApp({ profile, user, onEditProfile }) {
             </div>
           )}
         </div>
-        <button onClick={() => setBoardroomMode(true)} style={{ background: "#7C3AED", border: "none", color: "white", borderRadius: 8, padding: "5px 14px", fontSize: 12, fontWeight: 600 }}>📱 Boardroom</button>
-        <button onClick={onEditProfile} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Edit Profile</button>
-        <button onClick={signOut} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(196,181,253,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 11 }}>Sign out</button>
+        <button onClick={() => setBoardroomMode(true)} style={{ background: "#7C3AED", border: "none", color: "white", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, marginLeft: isMobile ? "auto" : 0, flexShrink: 0 }}>📱 Boardroom</button>
+        <button onClick={onEditProfile} style={{ display: isMobile ? "none" : "block", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Edit Profile</button>
+        <button onClick={signOut} style={{ display: isMobile ? "none" : "block", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(196,181,253,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 11 }}>Sign out</button>
         {mode === "live" && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={clearSession} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Clear</button>
@@ -1144,7 +1221,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
 
       {/* PREP MODE */}
       {mode === "prep" && (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "420px 1fr", overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "420px 1fr", overflow: "auto" }}>
           <div style={{ background: "white", borderRight: "1px solid #DDD6FE", overflowY: "auto", padding: "24px 26px" }}>
             <div style={{ marginBottom: 20 }}>
               <button onClick={() => setShowPlanner(p => !p)} style={{ width: "100%", background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#5B21B6", fontSize: 13, fontWeight: 600 }}>
@@ -1237,7 +1314,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
             <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
             {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
           </div>
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", overflow: "hidden", minHeight: 0 }}>
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", overflow: "auto", minHeight: 0 }}>
             <div style={{ background: "white", borderRight: "1px solid #DDD6FE", display: "flex", flexDirection: "column", overflow: "hidden" }}>
               <div style={{ background: "#F5F3FF", padding: "11px 20px", borderBottom: "1px solid #DDD6FE", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2563eb" }} />
