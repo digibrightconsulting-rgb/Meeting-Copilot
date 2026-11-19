@@ -1,17 +1,30 @@
- export default async function handler(req, res) {
+ import { verifyUser } from "./_verify.js";
+
+export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+  // The user ID now comes from the verified sign-in token, never from the request body,
+  // so nobody can read or overwrite someone else's profile.
+  const user = await verifyUser(req);
+  if (!user) return res.status(401).json({ error: "Not signed in" });
+
+  let body;
+  try {
+    body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+  } catch {
+    return res.status(400).json({ error: "Invalid JSON" });
+  }
   const { action, ...data } = body;
+  const userId = user.id;
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
   try {
     if (action === "upsert_profile") {
-      const { userId, profile } = data;
+      const { profile } = data;
       const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
         method: "POST",
         headers: {
@@ -42,8 +55,7 @@
     }
 
     if (action === "get_profile") {
-      const { userId } = data;
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=*`, {
         headers: {
           "apikey": SUPABASE_SERVICE_KEY,
           "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,

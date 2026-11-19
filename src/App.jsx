@@ -1,36 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── API ────────────────────────────────────────────────────────────────────
-async function callClaudeFast(prompt) {
-  const res = await fetch("/api/chat", {
+async function callModel(model, maxTokens, prompt, fallback) {
+  const res = await authedFetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 600, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
   });
   const data = await res.json();
-  return (data.content?.find(b => b.type === "text")?.text || "[]").replace(/```json|```/g, "").trim();
+  if (!res.ok) throw new Error(data?.error?.message || data?.error || `API error ${res.status}`);
+  return (data.content?.find(b => b.type === "text")?.text || fallback).replace(/```json|```/g, "").trim();
 }
 
-async function callClaude(prompt) {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200, messages: [{ role: "user", content: prompt }] }),
-  });
-  const data = await res.json();
-  return (data.content?.find(b => b.type === "text")?.text || "[]").replace(/```json|```/g, "").trim();
-}
-
+const callClaudeFast = (prompt) => callModel("claude-haiku-4-5-20251001", 600, prompt, "[]");
+const callClaude = (prompt) => callModel("claude-sonnet-4-6", 1200, prompt, "[]");
 // Higher token limit for summaries (long transcripts need room)
-async function callClaudeLong(prompt) {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
-  });
-  const data = await res.json();
-  return (data.content?.find(b => b.type === "text")?.text || "{}").replace(/```json|```/g, "").trim();
-}
+const callClaudeLong = (prompt) => callModel("claude-sonnet-4-6", 3000, prompt, "{}");
 
 // Resilient JSON parse — tolerates truncated responses by repairing/extracting
 function safeParse(raw) {
@@ -73,6 +57,55 @@ async function supabaseRequest(path, options = {}) {
   return res.json();
 }
 
+// ── SESSION TOKENS ─────────────────────────────────────────────────────────
+// Supabase access tokens expire after ~1 hour. These helpers refresh them
+// automatically so long meetings don't start failing mid-call.
+function tokenExpiresSoon(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return !payload.exp || payload.exp * 1000 - Date.now() < 60000;
+  } catch { return true; }
+}
+
+async function refreshSession() {
+  const refreshToken = localStorage.getItem("unmute_refresh_token");
+  if (!refreshToken) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.access_token) return null;
+    localStorage.setItem("unmute_access_token", data.access_token);
+    if (data.refresh_token) localStorage.setItem("unmute_refresh_token", data.refresh_token);
+    return data.access_token;
+  } catch { return null; }
+}
+
+let refreshInFlight = null;
+async function getAccessToken() {
+  const token = localStorage.getItem("unmute_access_token");
+  if (token && !tokenExpiresSoon(token)) return token;
+  if (!refreshInFlight) refreshInFlight = refreshSession().finally(() => { refreshInFlight = null; });
+  return (await refreshInFlight) || token;
+}
+
+// fetch() for our own /api endpoints, with the signed-in user's token attached
+async function authedFetch(url, options = {}) {
+  const token = await getAccessToken();
+  return fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+    },
+  });
+}
+
 async function signInWithGoogle() {
   const redirectTo = window.location.hostname === "localhost"
     ? "http://localhost:3000"
@@ -98,12 +131,20 @@ async function signOut() {
 }
 
 async function getSession() {
-  const token = localStorage.getItem("unmute_access_token");
+  let token = await getAccessToken();
   if (!token) return null;
   try {
-    const data = await supabaseRequest("/auth/v1/user", {
+    let data = await supabaseRequest("/auth/v1/user", {
       headers: { "Authorization": `Bearer ${token}` },
     });
+    if (!data.id) {
+      // Token rejected — try once with a refreshed token before giving up
+      token = await refreshSession();
+      if (!token) return null;
+      data = await supabaseRequest("/auth/v1/user", {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+    }
     if (data.id) return { user: data, access_token: token };
     return null;
   } catch { return null; }
@@ -126,9 +167,8 @@ async function handleAuthCallback() {
 
 async function saveProfile(userId, profile) {
   try {
-    await fetch("/api/auth", {
+    await authedFetch("/api/auth", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "upsert_profile", userId, profile }),
     });
   } catch(e) { console.error("Save profile error:", e); }
@@ -145,6 +185,12 @@ async function fetchCalendar(accessToken) {
     return data.events || [];
   } catch(e) { console.error("Calendar error:", e); return []; }
 }
+
+// How often live suggestions are requested (see triggerDebounced in MeetingApp)
+const SUGGESTION_TIMING = {
+  live:      { quietMs: 2500, maxWaitMs: 7000,  minGapMs: 4000 },
+  boardroom: { quietMs: 4000, maxWaitMs: 12000, minGapMs: 8000 },
+};
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const LANGUAGES = [
@@ -836,6 +882,14 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const recognitionRef = useRef(null);
   const transcriptRef = useRef([]);
   const debounceRef = useRef(null);
+  const runFetchRef = useRef(null);
+  const timingRef = useRef(SUGGESTION_TIMING.live);
+  const scheduleRef = useRef(() => {});
+  const inFlightRef = useRef(false);
+  const rerunRef = useRef(false);
+  const lastSentLenRef = useRef(0);
+  const lastFiredAtRef = useRef(0);
+  const firstPendingAtRef = useRef(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -916,12 +970,47 @@ function MeetingApp({ profile, user, onEditProfile }) {
     } catch (e) { console.error(e); setLiveStatus("listening"); }
   }, [profile]);
 
+  // ── Suggestion timing ──────────────────────────────────────────────────
+  // Old behaviour: wait for 12s of silence (each new sentence reset the timer),
+  // so in a busy meeting suggestions only arrived after the moment had passed.
+  // New behaviour: fire after a short pause, OR at least every few seconds while
+  // people keep talking. Only one request runs at a time; if speech arrives while
+  // one is in flight, another runs as soon as it finishes.
+
+  const fireSuggestions = useCallback(async () => {
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+    if (inFlightRef.current) { rerunRef.current = true; return; }
+    const len = transcriptRef.current.length;
+    if (len === lastSentLenRef.current) return; // nothing new since last request
+    inFlightRef.current = true;
+    lastFiredAtRef.current = Date.now();
+    firstPendingAtRef.current = null;
+    lastSentLenRef.current = len;
+    try { await runFetchRef.current(); }
+    finally {
+      inFlightRef.current = false;
+      if (rerunRef.current) { rerunRef.current = false; scheduleRef.current(); }
+    }
+  }, []);
+
   const triggerDebounced = useCallback(() => {
+    const now = Date.now();
+    const { quietMs, maxWaitMs, minGapMs } = timingRef.current;
+    if (!firstPendingAtRef.current) firstPendingAtRef.current = now;
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      if (boardroomMode) fetchBoardroomCards(); else fetchLiveSuggestions();
-    }, boardroomMode ? 9000 : 12000);
-  }, [fetchLiveSuggestions, fetchBoardroomCards, boardroomMode]);
+    const untilMaxWait = Math.max(0, maxWaitMs - (now - firstPendingAtRef.current));
+    const untilMinGap = Math.max(0, minGapMs - (now - lastFiredAtRef.current));
+    const wait = Math.max(Math.min(quietMs, untilMaxWait), untilMinGap);
+    debounceRef.current = setTimeout(fireSuggestions, wait);
+  }, [fireSuggestions]);
+
+  // Keep refs pointing at the latest functions/timing so the speech handler
+  // (created once when listening starts) always uses the current mode.
+  useEffect(() => {
+    runFetchRef.current = boardroomMode ? fetchBoardroomCards : fetchLiveSuggestions;
+    timingRef.current = boardroomMode ? SUGGESTION_TIMING.boardroom : SUGGESTION_TIMING.live;
+    scheduleRef.current = triggerDebounced;
+  }, [boardroomMode, fetchBoardroomCards, fetchLiveSuggestions, triggerDebounced]);
 
   const pauseListening = () => {
     shouldListenRef.current = false;
@@ -946,7 +1035,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     if (!SR) { setLiveError("Use Chrome for voice recognition."); return; }
     const r = new SR();
     r.continuous = true; r.interimResults = true; r.lang = language.code;
-    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { setTranscript(prev => [...prev, { id: Date.now() + Math.random(), text: e.results[i][0].transcript.trim() }]); triggerDebounced(); } } };
+    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { const entry = { id: Date.now() + Math.random(), text: e.results[i][0].transcript.trim() }; transcriptRef.current = [...transcriptRef.current, entry]; setTranscript(prev => [...prev, entry]); scheduleRef.current(); } } };
     r.onerror = (e) => { if (e.error !== "no-speech") { setLiveError(`Mic: ${e.error}`); setLiveStatus("error"); } };
     r.onend = () => {
       // Only restart if we are genuinely still meant to be listening.
@@ -957,7 +1046,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     };
     shouldListenRef.current = true;
     r.start(); recognitionRef.current = r; setIsListening(true); setLiveStatus("listening"); setLiveError("");
-  }, [language, triggerDebounced]);
+  }, [language]);
 
   const endMeeting = useCallback(() => {
     shouldListenRef.current = false;
@@ -995,7 +1084,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     setChatLoading(false);
   };
 
-  const clearSession = () => { setTranscript([]); setLiveSuggestions([]); setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
+  const clearSession = () => { transcriptRef.current = []; lastSentLenRef.current = 0; firstPendingAtRef.current = null; setTranscript([]); setLiveSuggestions([]); setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
   const statusInfo = { idle: { color: "#9ca3af", label: "Ready" }, listening: { color: "#16a34a", label: "Listening" }, thinking: { color: "#d97706", label: "Analysing…" }, error: { color: "#dc2626", label: "Error" } };
 
   // ── BOARDROOM MODE — full screen, minimal, mobile-first ──────────────────
