@@ -106,12 +106,67 @@ async function authedFetch(url, options = {}) {
   });
 }
 
-async function signInWithGoogle() {
-  const redirectTo = window.location.hostname === "localhost"
-    ? "http://localhost:3000"
-    : "https://app.meetunmute.com";
-  const redirectUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&scopes=${encodeURIComponent("openid email profile https://www.googleapis.com/auth/calendar.readonly")}`;
-  window.location.href = redirectUrl;
+// ── EMAIL AUTH (Supabase) ──────────────────────────────────────────────────
+function authRedirect() {
+  return window.location.hostname === "localhost" ? "http://localhost:3000" : "https://app.meetunmute.com";
+}
+
+function storeSession(data) {
+  localStorage.setItem("unmute_access_token", data.access_token);
+  if (data.refresh_token) localStorage.setItem("unmute_refresh_token", data.refresh_token);
+}
+
+function friendlyAuthError(data, fallback) {
+  const raw = data?.msg || data?.error_description || data?.message || data?.error || "";
+  if (/invalid login credentials/i.test(raw)) return "That email and password don't match. Try again or reset your password.";
+  if (/email not confirmed/i.test(raw)) return "Please confirm your email first. Check your inbox for the link we sent.";
+  if (/already registered|already exists/i.test(raw)) return "There's already an account with that email. Try signing in instead.";
+  if (/rate limit|too many/i.test(raw)) return "Too many attempts. Please wait a few minutes and try again.";
+  if (/password/i.test(raw) && /(short|least|weak)/i.test(raw)) return "Please choose a stronger password (at least 8 characters).";
+  return raw || fallback;
+}
+
+async function supabaseAuthPost(path, body) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, data };
+}
+
+// Returns { signedIn: true } if the account is usable straight away,
+// or { signedIn: false } if a confirmation email was sent.
+async function signUpWithEmail(name, email, password) {
+  const { ok, data } = await supabaseAuthPost(`/signup?redirect_to=${encodeURIComponent(authRedirect())}`, {
+    email, password, data: { name },
+  });
+  if (!ok) throw new Error(friendlyAuthError(data, "Could not create your account. Please try again."));
+  if (data.access_token) { storeSession(data); return { signedIn: true }; }
+  return { signedIn: false };
+}
+
+async function signInWithEmail(email, password) {
+  const { ok, data } = await supabaseAuthPost("/token?grant_type=password", { email, password });
+  if (!ok || !data.access_token) throw new Error(friendlyAuthError(data, "Could not sign you in. Please try again."));
+  storeSession(data);
+}
+
+async function sendPasswordReset(email) {
+  const { ok, data } = await supabaseAuthPost(`/recover?redirect_to=${encodeURIComponent(authRedirect())}`, { email });
+  if (!ok) throw new Error(friendlyAuthError(data, "Could not send the reset email. Please try again."));
+}
+
+async function updatePassword(password) {
+  const token = await getAccessToken();
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(friendlyAuthError(data, "Could not update your password. Please try again."));
 }
 
 async function signOut() {
@@ -150,19 +205,25 @@ async function getSession() {
   } catch { return null; }
 }
 
-async function handleAuthCallback() {
+// Handles the links in confirmation / password-reset emails, which land on the
+// app with the session (or an error) in the URL hash.
+function handleAuthCallback() {
   const hash = window.location.hash;
-  if (!hash) return null;
+  if (!hash || hash.length < 2) return {};
   const params = new URLSearchParams(hash.substring(1));
-  const accessToken = params.get("access_token");
-  const refreshToken = params.get("refresh_token");
-  if (accessToken) {
-    localStorage.setItem("unmute_access_token", accessToken);
-    if (refreshToken) localStorage.setItem("unmute_refresh_token", refreshToken);
-    window.history.replaceState({}, document.title, window.location.pathname);
-    return accessToken;
+  const clearHash = () => window.history.replaceState({}, document.title, window.location.pathname);
+  const error = params.get("error_description") || params.get("error");
+  if (error) {
+    clearHash();
+    return { error: /expired|invalid/i.test(error) ? "That link has expired or was already used. Please request a new one." : error.replace(/\+/g, " ") };
   }
-  return null;
+  const accessToken = params.get("access_token");
+  if (accessToken) {
+    storeSession({ access_token: accessToken, refresh_token: params.get("refresh_token") });
+    clearHash();
+    return { type: params.get("type") };
+  }
+  return {};
 }
 
 async function saveProfile(userId, profile) {
@@ -172,18 +233,6 @@ async function saveProfile(userId, profile) {
       body: JSON.stringify({ action: "upsert_profile", userId, profile }),
     });
   } catch(e) { console.error("Save profile error:", e); }
-}
-
-async function fetchCalendar(accessToken) {
-  try {
-    const res = await fetch("/api/calendar", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accessToken }),
-    });
-    const data = await res.json();
-    return data.events || [];
-  } catch(e) { console.error("Calendar error:", e); return []; }
 }
 
 // How often live suggestions are requested (see triggerDebounced in MeetingApp)
@@ -480,9 +529,9 @@ function SkillAdder({ onAdd }) {
 }
 
 // ── ONBOARDING ─────────────────────────────────────────────────────────────
-function Onboarding({ onComplete }) {
+function Onboarding({ onComplete, initialName = "" }) {
   const [step, setStep] = useState(0);
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, name: initialName });
   const [consentGiven, setConsentGiven] = useState(false);
   const totalSteps = 8;
 
@@ -749,41 +798,183 @@ function Onboarding({ onComplete }) {
 
 
 // ── AUTH SCREEN ────────────────────────────────────────────────────────────
-function AuthScreen() {
-  const [loading, setLoading] = useState(false);
+const authInput = { width: "100%", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none", background: "white" };
+const authLabel = { display: "block", fontSize: 12, fontWeight: 600, color: "#5B21B6", margin: "0 0 6px" };
+const authPrimary = (busy) => ({ width: "100%", background: busy ? "#A78BFA" : "#6D28D9", border: "none", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer", color: "white", fontFamily: "'Plus Jakarta Sans', sans-serif", boxShadow: "0 4px 14px rgba(109,40,217,0.25)", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 });
+const authLink = { background: "none", border: "none", padding: 0, color: "#6D28D9", fontWeight: 600, cursor: "pointer", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" };
 
+function AuthShell({ children }) {
   return (
-    <div style={{ height: "100vh", background: "linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 60%, #E0D9F5 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 60%, #E0D9F5 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
         *{box-sizing:border-box}
+        .auth-input:focus{border-color:#7C3AED !important; box-shadow:0 0 0 3px rgba(124,58,237,0.12)}
       `}</style>
-      <div style={{ background: "white", borderRadius: 20, padding: "48px", maxWidth: 440, width: "100%", textAlign: "center", boxShadow: "0 8px 40px rgba(109,40,217,0.12)", animation: "slideIn 0.3s ease" }}>
-        <div style={{ width: 64, height: 64, background: "#3B0764", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px", boxShadow: "0 4px 20px rgba(59,7,100,0.35)" }}>📣</div>
-        <h1 style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 28, fontWeight: 900, color: "#3B0764", margin: "0 0 8px", letterSpacing: "-0.02em" }}>Unmute</h1>
-        <p style={{ color: "#9B8FC0", fontSize: 13, margin: "0 0 8px", fontStyle: "italic" }}>for Marketers</p>
-        <p style={{ color: "#6b7280", fontSize: 14, lineHeight: 1.6, margin: "0 0 32px" }}>Your AI co-pilot for every Zoom, Meet, and Teams call. Real-time talking points tailored to your marketing role.</p>
-
-        <button
-          onClick={() => { setLoading(true); signInWithGoogle(); }}
-          disabled={loading}
-          style={{ width: "100%", background: loading ? "#F5F3FF" : "white", border: "1.5px solid #DDD6FE", borderRadius: 12, padding: "14px 20px", fontSize: 15, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, color: "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.15s", marginBottom: 16 }}
-        >
-          {loading ? (
-            <div style={{ width: 20, height: 20, border: "2px solid #6D28D9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-          ) : (
-            <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-          )}
-          {loading ? "Redirecting…" : "Continue with Google"}
-        </button>
-
-        <p style={{ fontSize: 11, color: "#C4B5FD", lineHeight: 1.6 }}>
-          By continuing you agree to our <a href="https://meetunmute.com/terms.html" target="_blank" style={{ color: "#6D28D9" }}>Terms</a> and <a href="https://meetunmute.com/privacy.html" target="_blank" style={{ color: "#6D28D9" }}>Privacy Policy</a>. Audio is never recorded or stored.
-        </p>
+      <div style={{ background: "white", borderRadius: 20, padding: "40px 40px 32px", maxWidth: 440, width: "100%", textAlign: "center", boxShadow: "0 8px 40px rgba(109,40,217,0.12)", animation: "slideIn 0.3s ease" }}>
+        <div style={{ width: 64, height: 64, background: "#3B0764", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 18px", boxShadow: "0 4px 20px rgba(59,7,100,0.35)" }}>📣</div>
+        <h1 style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 28, fontWeight: 900, color: "#3B0764", margin: "0 0 6px", letterSpacing: "-0.02em" }}>Unmute</h1>
+        <p style={{ color: "#9B8FC0", fontSize: 13, margin: "0 0 24px", fontStyle: "italic" }}>for Marketers</p>
+        {children}
       </div>
     </div>
+  );
+}
+
+function AuthMessage({ kind, children }) {
+  if (!children) return null;
+  const err = kind === "error";
+  return <div style={{ background: err ? "#FEF2F2" : "#F0FDF4", border: `1px solid ${err ? "#FCA5A5" : "#86EFAC"}`, color: err ? "#B91C1C" : "#166534", borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.5, textAlign: "left", marginBottom: 14 }}>{children}</div>;
+}
+
+function Spinner() {
+  return <div style={{ width: 18, height: 18, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />;
+}
+
+function AuthScreen({ initialError = "" }) {
+  const [mode, setMode] = useState("signup"); // signup | signin | forgot | checkEmail | resetSent
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(initialError);
+
+  const switchTo = (m) => { setMode(m); setError(""); setPassword(""); };
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    const cleanEmail = email.trim().toLowerCase();
+    if (mode === "signup" && !name.trim()) return setError("Please enter your name.");
+    if (!validEmail) return setError("Please enter a valid email address.");
+    if (mode !== "forgot" && password.length < 8) return setError("Your password needs at least 8 characters.");
+    setBusy(true);
+    try {
+      if (mode === "signup") {
+        const { signedIn } = await signUpWithEmail(name.trim(), cleanEmail, password);
+        if (signedIn) { window.location.reload(); return; }
+        setMode("checkEmail");
+      } else if (mode === "signin") {
+        await signInWithEmail(cleanEmail, password);
+        window.location.reload();
+        return;
+      } else if (mode === "forgot") {
+        await sendPasswordReset(cleanEmail);
+        setMode("resetSent");
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+    setBusy(false);
+  };
+
+  if (mode === "checkEmail" || mode === "resetSent") {
+    return (
+      <AuthShell>
+        <div style={{ fontSize: 36, marginBottom: 10 }}>✉️</div>
+        <h2 style={{ fontSize: 18, color: "#3B0764", margin: "0 0 10px" }}>Check your email</h2>
+        <p style={{ color: "#6b7280", fontSize: 14, lineHeight: 1.6, margin: "0 0 22px" }}>
+          {mode === "checkEmail"
+            ? <>We've sent a confirmation link to <strong style={{ color: "#3B0764" }}>{email.trim()}</strong>. Click it to activate your account and you'll be taken straight into Unmute.</>
+            : <>If there's an account for <strong style={{ color: "#3B0764" }}>{email.trim()}</strong>, we've sent a link to reset your password.</>}
+        </p>
+        <p style={{ color: "#9B8FC0", fontSize: 12, margin: "0 0 18px" }}>Can't see it? Check your spam folder.</p>
+        <button style={authLink} onClick={() => switchTo("signin")}>Back to sign in</button>
+      </AuthShell>
+    );
+  }
+
+  const titles = {
+    signup: ["Create your account", "Real-time talking points for every Zoom, Meet and Teams call, tailored to your marketing role."],
+    signin: ["Welcome back", "Sign in to your Unmute account."],
+    forgot: ["Reset your password", "Enter your email and we'll send you a link to choose a new password."],
+  };
+  const buttonText = { signup: "Create account", signin: "Sign in", forgot: "Send reset link" }[mode];
+
+  return (
+    <AuthShell>
+      <h2 style={{ fontSize: 18, color: "#3B0764", margin: "0 0 6px" }}>{titles[mode][0]}</h2>
+      <p style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.6, margin: "0 0 22px" }}>{titles[mode][1]}</p>
+      <AuthMessage kind="error">{error}</AuthMessage>
+      <form onSubmit={submit} noValidate style={{ textAlign: "left" }}>
+        {mode === "signup" && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={authLabel} htmlFor="auth-name">Name</label>
+            <input id="auth-name" className="auth-input" style={authInput} value={name} onChange={e => setName(e.target.value)} autoComplete="name" placeholder="Your full name" />
+          </div>
+        )}
+        <div style={{ marginBottom: 14 }}>
+          <label style={authLabel} htmlFor="auth-email">Work email</label>
+          <input id="auth-email" className="auth-input" style={authInput} type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="you@company.com" />
+        </div>
+        {mode !== "forgot" && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <label style={authLabel} htmlFor="auth-password">Password</label>
+              {mode === "signin" && <button type="button" style={{ ...authLink, fontSize: 12, fontWeight: 500 }} onClick={() => switchTo("forgot")}>Forgot password?</button>}
+            </div>
+            <input id="auth-password" className="auth-input" style={authInput} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder={mode === "signup" ? "At least 8 characters" : "Your password"} />
+          </div>
+        )}
+        <button type="submit" disabled={busy} style={authPrimary(busy)}>
+          {busy && <Spinner />}{busy ? "Please wait…" : buttonText}
+        </button>
+      </form>
+
+      <p style={{ fontSize: 13, color: "#6b7280", margin: "18px 0 0" }}>
+        {mode === "signup" && <>Already have an account? <button style={authLink} onClick={() => switchTo("signin")}>Sign in</button></>}
+        {mode === "signin" && <>New to Unmute? <button style={authLink} onClick={() => switchTo("signup")}>Create an account</button></>}
+        {mode === "forgot" && <button style={authLink} onClick={() => switchTo("signin")}>Back to sign in</button>}
+      </p>
+
+      {mode === "signup" && (
+        <p style={{ fontSize: 11, color: "#A78BFA", lineHeight: 1.6, margin: "16px 0 0" }}>
+          By creating an account you agree to our <a href="https://meetunmute.com/terms.html" target="_blank" rel="noreferrer" style={{ color: "#6D28D9" }}>Terms</a> and <a href="https://meetunmute.com/privacy.html" target="_blank" rel="noreferrer" style={{ color: "#6D28D9" }}>Privacy Policy</a>. Audio is never recorded or stored.
+        </p>
+      )}
+    </AuthShell>
+  );
+}
+
+// Shown when someone arrives from a "reset your password" email
+function SetNewPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (password.length < 8) return setError("Your password needs at least 8 characters.");
+    if (password !== confirm) return setError("The two passwords don't match.");
+    setBusy(true);
+    try { await updatePassword(password); onDone(); }
+    catch (err) { setError(err.message); setBusy(false); }
+  };
+
+  return (
+    <AuthShell>
+      <h2 style={{ fontSize: 18, color: "#3B0764", margin: "0 0 6px" }}>Choose a new password</h2>
+      <p style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.6, margin: "0 0 22px" }}>You'll use this to sign in from now on.</p>
+      <AuthMessage kind="error">{error}</AuthMessage>
+      <form onSubmit={submit} noValidate style={{ textAlign: "left" }}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={authLabel} htmlFor="new-password">New password</label>
+          <input id="new-password" className="auth-input" style={authInput} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" placeholder="At least 8 characters" />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={authLabel} htmlFor="confirm-password">Confirm new password</label>
+          <input id="confirm-password" className="auth-input" style={authInput} type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" placeholder="Type it again" />
+        </div>
+        <button type="submit" disabled={busy} style={authPrimary(busy)}>
+          {busy && <Spinner />}{busy ? "Saving…" : "Save password"}
+        </button>
+      </form>
+    </AuthShell>
   );
 }
 
@@ -793,11 +984,15 @@ export default function App() {
   const [onboarded, setOnboarded] = useState(false);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [ready, setReady] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [recovering, setRecovering] = useState(false);
 
   useEffect(() => {
     async function init() {
-      // Handle OAuth callback
-      await handleAuthCallback();
+      // Handle links from confirmation / password-reset emails
+      const callback = handleAuthCallback();
+      if (callback.error) setAuthError(callback.error);
+      if (callback.type === "recovery") setRecovering(true);
 
       // Check session
       const session = await getSession();
@@ -831,8 +1026,9 @@ export default function App() {
     </div>
   );
 
-  if (!user) return <AuthScreen />;
-  if (!onboarded) return <Onboarding onComplete={handleOnboardingComplete} />;
+  if (!user) return <AuthScreen initialError={authError} />;
+  if (recovering) return <SetNewPasswordScreen onDone={() => setRecovering(false)} />;
+  if (!onboarded) return <Onboarding onComplete={handleOnboardingComplete} initialName={user.user_metadata?.name || ""} />;
   return <MeetingApp profile={profile} user={user} onEditProfile={() => { localStorage.removeItem("unmute_mkt_onboarded"); window.location.reload(); }} />;
 }
 
@@ -849,9 +1045,6 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const [boardroomCards, setBoardroomCards] = useState([]);
   const [pinnedCards, setPinnedCards] = useState([]);
   const coveredRef = useRef([]);
-  const [calendarEvents, setCalendarEvents] = useState([]);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(false);
 
   const [prepTopic, setPrepTopic] = useState("");
   const [prepAttendees, setPrepAttendees] = useState("");
@@ -923,22 +1116,6 @@ function MeetingApp({ profile, user, onEditProfile }) {
 
   const loadMeeting = (m) => { setPrepTopic(m.topic); setPrepAttendees(m.attendees); setPrepGoal(m.goal); setPrepConcerns(m.concerns); setPrepData(m.data); setShowPlanner(false); };
   const deleteMeeting = (id) => { const u = savedMeetings.filter(m => m.id !== id); setSavedMeetings(u); localStorage.setItem("unmute_mkt_meetings", JSON.stringify(u)); };
-
-  const loadCalendarEvents = async () => {
-    const token = localStorage.getItem("unmute_access_token");
-    if (!token) return;
-    setCalendarLoading(true);
-    const events = await fetchCalendar(token);
-    setCalendarEvents(events);
-    setCalendarLoading(false);
-    setShowCalendar(true);
-  };
-
-  const loadEventToPrep = (event) => {
-    setPrepTopic(event.title);
-    setPrepAttendees(event.attendees || "");
-    setShowCalendar(false);
-  };
 
   const fetchLiveSuggestions = useCallback(async () => {
     const recent = transcriptRef.current.slice(-15).map(t => t.text).join(" ");
@@ -1333,40 +1510,6 @@ function MeetingApp({ profile, user, onEditProfile }) {
                 </div>
               )}
             </div>
-            {/* Google Calendar sync */}
-            <div style={{ marginBottom: 16 }}>
-              <button onClick={loadCalendarEvents} disabled={calendarLoading} style={{ width: "100%", background: showCalendar ? "#EDE9FE" : "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#5B21B6", fontSize: 13, fontWeight: 600 }}>
-                <span>📅</span>
-                <span>{calendarLoading ? "Loading calendar…" : "Today's Meetings"}</span>
-                {calendarLoading && <div style={{ width: 12, height: 12, border: "2px solid #6D28D9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", marginLeft: 4 }} />}
-                <span style={{ marginLeft: "auto", fontSize: 10, color: "#9B8FC0" }}>{showCalendar ? "▲" : "▼"}</span>
-              </button>
-              {showCalendar && (
-                <div style={{ border: "1px solid #DDD6FE", borderTop: "none", borderRadius: "0 0 10px 10px", overflow: "hidden" }}>
-                  {calendarEvents.length === 0 ? (
-                    <div style={{ padding: "16px 14px", textAlign: "center", color: "#C4B5FD", fontSize: 12, fontStyle: "italic" }}>
-                      No meetings found for today.
-                    </div>
-                  ) : calendarEvents.map((event, i) => {
-                    const time = event.start ? new Date(event.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-                    return (
-                      <div key={event.id} style={{ padding: "10px 14px", borderBottom: i < calendarEvents.length - 1 ? "1px solid #F5F3FF" : "none", display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ flexShrink: 0, textAlign: "center", minWidth: 44 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "#6D28D9", fontFamily: "monospace" }}>{time}</div>
-                          {event.isOnline && <div style={{ fontSize: 9, color: "#10B981", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>online</div>}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#3B0764", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.title}</div>
-                          {event.attendees && <div style={{ fontSize: 11, color: "#9B8FC0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{event.attendees}</div>}
-                        </div>
-                        <button onClick={() => loadEventToPrep(event)} style={{ background: "#6D28D9", border: "none", color: "white", borderRadius: 6, padding: "5px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>→ Prep</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
             <div style={{ marginBottom: 20 }}>
               <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Meeting Brief Builder</h2>
               <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Generate a personalised brief — includes an Industry Pulse with the latest marketing trends relevant to your meeting.</p>
