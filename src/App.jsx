@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { meetingAudioSupported, pickMeetingAudio, stopStream, streamIsLive, MeetingTranscriber, formatTranscript } from "./meetingAudio.js";
 
 // ── API ────────────────────────────────────────────────────────────────────
 async function callModel(model, maxTokens, prompt, fallback) {
@@ -314,6 +315,8 @@ function buildLivePrompt(profile, transcript, goal, language, prepContext) {
   const styleGuide = { "data-driven": "Back suggestions with specific numbers and evidence.", "strategic": "Frame around big picture direction and long-term impact.", "collaborative": "Build consensus and acknowledge others views.", "direct": "Short, plain, assertive — no hedging.", "diplomatic": "Tactful ways to make points without friction.", "adaptive": "Match the energy and tone of the room." }[profile.communicationStyle] || "Be confident and clear.";
   const platformContext = profile.platforms.length > 0 ? `Active platforms: ${profile.platforms.join(", ")}. Draw on specific knowledge of these platforms — their attribution models, recent changes, algorithm updates, and best practices.` : "";
 
+  const speakerNote = transcript.includes("Them: ") ? `Lines starting "You:" are what ${profile.name || "the user"} said; lines starting "Them:" are the other people on the call. Focus on responding to what the others just said or asked.` : "";
+
   return `You are a real-time AI co-pilot for a marketing professional. Suggest what they should say RIGHT NOW.
 
 PROFILE:
@@ -328,6 +331,7 @@ ${profile.meetingObjective ? "Typically trying to: " + profile.meetingObjective 
 ${goal ? "Session goal: " + goal : ""}
 ${prepContext ? "Pre-meeting context: " + prepContext : ""}
 ${translateNote}
+${speakerNote}
 
 LAST 90 SECONDS:
 "${transcript}"
@@ -442,7 +446,7 @@ Attendees: ${prepAttendees || "Not specified"}
 Goal: ${goal || "Not specified"}
 
 TRANSCRIPT:
-"${transcript.map(t => t.text).join(" ")}"
+"${formatTranscript(transcript)}"
 
 Respond ONLY with a JSON object:
 {
@@ -978,6 +982,62 @@ function SetNewPasswordScreen({ onDone }) {
   );
 }
 
+// ── LIVE SESSION: meeting audio button + transcript ──────────────────────
+function MeetingAudioControl({ status, isListening, onConnect, onDisconnect }) {
+  const chip = { display: "flex", alignItems: "center", gap: 7, borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif" };
+  if (status === "connected") {
+    return (
+      <div style={{ ...chip, background: "#DCFCE7", border: "1px solid #86EFAC", color: "#166534" }} title="Unmute is transcribing the other people on the call">
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#16a34a", animation: "pulse 2s infinite" }} />
+        Hearing the meeting
+        <button onClick={onDisconnect} style={{ background: "none", border: "none", color: "#166534", cursor: "pointer", fontSize: 12, padding: 0, marginLeft: 2, textDecoration: "underline" }}>Stop</button>
+      </div>
+    );
+  }
+  if (status === "picking" || status === "connecting") {
+    return <div style={{ ...chip, background: "#EDE9FE", border: "1px solid #C4B5FD", color: "#5B21B6" }}>{status === "picking" ? "Choose your meeting tab…" : "Connecting to meeting audio…"}</div>;
+  }
+  if (status === "paused") {
+    return <div style={{ ...chip, background: "#F3F4F6", border: "1px solid #D1D5DB", color: "#4B5563" }} title="Resumes when you press Start Listening">Meeting audio paused</div>;
+  }
+  return (
+    <button
+      onClick={onConnect}
+      disabled={!isListening}
+      title={isListening ? "Pick your Zoom, Meet or Teams tab so Unmute can hear the other people" : "Start listening first"}
+      style={{ ...chip, background: isListening ? "#6D28D9" : "#EDE9FE", border: `1px solid ${isListening ? "#6D28D9" : "#DDD6FE"}`, color: isListening ? "white" : "#A78BFA", cursor: isListening ? "pointer" : "not-allowed" }}
+    >
+      🔊 Hear the meeting
+    </button>
+  );
+}
+
+function LiveTranscript({ entries, scrollRef, isListening, meetingAudioOn }) {
+  const [open, setOpen] = useState(true);
+  const recent = entries.slice(-40);
+  return (
+    <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "#FAFAFF", border: "none", borderBottom: open ? "1px solid #EDE9FE" : "none", padding: "7px 22px", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Live transcript</span>
+        <span style={{ fontSize: 11, color: "#9B8FC0" }}>{meetingAudioOn ? "You + the meeting" : "Your microphone only"}</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "#A78BFA" }}>{open ? "Hide ▾" : "Show ▸"}</span>
+      </button>
+      {open && (
+        <div ref={scrollRef} style={{ maxHeight: 120, overflowY: "auto", padding: "8px 22px 10px", fontSize: 12.5, lineHeight: 1.55 }}>
+          {recent.length === 0
+            ? <div style={{ color: "#C4B5FD", fontStyle: "italic" }}>{isListening ? "Listening… what's said will appear here." : "Press Start Listening to begin."}</div>
+            : recent.map(e => (
+              <div key={e.id} style={{ display: "flex", gap: 8, marginBottom: 2 }}>
+                <span style={{ flexShrink: 0, width: 40, fontSize: 10.5, fontWeight: 700, color: e.speaker === "them" ? "#B45309" : "#6D28D9", fontFamily: "monospace", paddingTop: 2 }}>{e.speaker === "them" ? "THEM" : "YOU"}</span>
+                <span style={{ color: "#1E1033" }}>{e.text}</span>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
@@ -1064,6 +1124,9 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const [liveStatus, setLiveStatus] = useState("idle");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [liveError, setLiveError] = useState("");
+  const [meetingAudioStatus, setMeetingAudioStatus] = useState("off"); // off | picking | connecting | connected | error
+  const meetingStreamRef = useRef(null);
+  const meetingTranscriberRef = useRef(null);
   const [chatInput, setChatInput] = useState("");
   const [chatHistory, setChatHistory] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -1118,7 +1181,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const deleteMeeting = (id) => { const u = savedMeetings.filter(m => m.id !== id); setSavedMeetings(u); localStorage.setItem("unmute_mkt_meetings", JSON.stringify(u)); };
 
   const fetchLiveSuggestions = useCallback(async () => {
-    const recent = transcriptRef.current.slice(-15).map(t => t.text).join(" ");
+    const recent = formatTranscript(transcriptRef.current.slice(-15));
     if (recent.trim().length < 20) return;
     setLiveStatus("thinking");
     try {
@@ -1131,7 +1194,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
   }, [sessionGoal, language, prepTopic, prepGoal, profile]);
 
   const fetchBoardroomCards = useCallback(async () => {
-    const recent = transcriptRef.current.slice(-25).map(t => t.text).join(" ");
+    const recent = formatTranscript(transcriptRef.current.slice(-25));
     if (recent.trim().length < 40) return;
     setLiveStatus("thinking");
     try {
@@ -1189,7 +1252,73 @@ function MeetingApp({ profile, user, onEditProfile }) {
     scheduleRef.current = triggerDebounced;
   }, [boardroomMode, fetchBoardroomCards, fetchLiveSuggestions, triggerDebounced]);
 
+  // ── Meeting audio (the other people on the call) ──────────────────────
+  const stopMeetingTranscriber = () => {
+    if (meetingTranscriberRef.current) { meetingTranscriberRef.current.stop(); meetingTranscriberRef.current = null; }
+  };
+
+  const startMeetingTranscriber = useCallback((stream) => {
+    if (meetingTranscriberRef.current) meetingTranscriberRef.current.stop();
+    const transcriber = new MeetingTranscriber({
+      stream,
+      languageCode: language.code,
+      getToken: async () => {
+        const res = await authedFetch("/api/stt-token", { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new Error(data.error || "Could not start meeting transcription.");
+        return data.access_token;
+      },
+      onFinal: (text) => {
+        const entry = { id: Date.now() + Math.random(), text, speaker: "them" };
+        transcriptRef.current = [...transcriptRef.current, entry];
+        setTranscript(prev => [...prev, entry]);
+        scheduleRef.current();
+      },
+      onStatus: (status, message) => {
+        if (meetingTranscriberRef.current !== transcriber) return;
+        setMeetingAudioStatus(status);
+        if (status === "error") setLiveError(message);
+      },
+    });
+    meetingTranscriberRef.current = transcriber;
+    transcriber.start();
+  }, [language]);
+
+  const disconnectMeetingAudio = useCallback(() => {
+    stopMeetingTranscriber();
+    stopStream(meetingStreamRef.current);
+    meetingStreamRef.current = null;
+    setMeetingAudioStatus("off");
+  }, []);
+
+  const connectMeetingAudio = async () => {
+    setLiveError("");
+    setMeetingAudioStatus("picking");
+    try {
+      const stream = await pickMeetingAudio();
+      stopStream(meetingStreamRef.current);
+      meetingStreamRef.current = stream;
+      // If the user clicks Chrome's "Stop sharing", switch meeting audio off
+      stream.getTracks().forEach(t => t.addEventListener("ended", () => {
+        if (meetingStreamRef.current === stream) disconnectMeetingAudio();
+      }));
+      startMeetingTranscriber(stream);
+    } catch (err) {
+      setMeetingAudioStatus("off");
+      if (err?.message === "NO_AUDIO") {
+        setLiveError("No audio was shared. Click \"Hear the meeting\" again, pick your meeting tab and switch on \"Also share tab audio\".");
+      } else if (err?.name !== "NotAllowedError" && err?.name !== "AbortError") {
+        setLiveError("Couldn't connect to the meeting audio. Please try again.");
+      }
+    }
+  };
+
+  // Stop everything when leaving the page
+  useEffect(() => () => { stopMeetingTranscriber(); stopStream(meetingStreamRef.current); }, []);
+
   const pauseListening = () => {
+    stopMeetingTranscriber(); // keep the shared tab so Start resumes without re-picking
+    if (streamIsLive(meetingStreamRef.current)) setMeetingAudioStatus("paused");
     shouldListenRef.current = false;
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
@@ -1212,7 +1341,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     if (!SR) { setLiveError("Use Chrome for voice recognition."); return; }
     const r = new SR();
     r.continuous = true; r.interimResults = true; r.lang = language.code;
-    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { const entry = { id: Date.now() + Math.random(), text: e.results[i][0].transcript.trim() }; transcriptRef.current = [...transcriptRef.current, entry]; setTranscript(prev => [...prev, entry]); scheduleRef.current(); } } };
+    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { const entry = { id: Date.now() + Math.random(), text: e.results[i][0].transcript.trim(), speaker: "you" }; transcriptRef.current = [...transcriptRef.current, entry]; setTranscript(prev => [...prev, entry]); scheduleRef.current(); } } };
     r.onerror = (e) => { if (e.error !== "no-speech") { setLiveError(`Mic: ${e.error}`); setLiveStatus("error"); } };
     r.onend = () => {
       // Only restart if we are genuinely still meant to be listening.
@@ -1223,10 +1352,12 @@ function MeetingApp({ profile, user, onEditProfile }) {
     };
     shouldListenRef.current = true;
     r.start(); recognitionRef.current = r; setIsListening(true); setLiveStatus("listening"); setLiveError("");
-  }, [language]);
+    if (streamIsLive(meetingStreamRef.current) && !meetingTranscriberRef.current) startMeetingTranscriber(meetingStreamRef.current);
+  }, [language, startMeetingTranscriber]);
 
   const endMeeting = useCallback(() => {
     shouldListenRef.current = false;
+    disconnectMeetingAudio();
     if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setIsListening(false); setLiveStatus("idle");
@@ -1236,7 +1367,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
         .then(raw => { setSummary(safeParse(raw)); setSummaryLoading(false); })
         .catch(e => { console.error(e); setSummaryError("Error generating summary. Please try again."); setSummaryLoading(false); });
     }
-  }, [profile, sessionGoal, prepTopic, prepAttendees]);
+  }, [profile, sessionGoal, prepTopic, prepAttendees, disconnectMeetingAudio]);
 
   const generateSummary = async () => {
     if (transcript.length === 0) { setSummaryError("No transcript yet — run a live session first."); return; }
@@ -1251,7 +1382,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     setChatHistory(prev => [...prev, { role: "user", text: userMsg }]);
     setChatLoading(true);
     try {
-      const recentTranscript = transcriptRef.current.slice(-10).map(t => t.text).join(" ");
+      const recentTranscript = formatTranscript(transcriptRef.current.slice(-10));
       const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("\n");
       const prompt = `You are a real-time AI assistant for a ${profile.role}${profile.company ? " at " + profile.company : ""} on a marketing video call.\n${profile.company ? "Draw on your knowledge of " + profile.company + " — their industry, products, competitors and business model." : ""}\nPlatforms they use: ${profile.platforms.join(", ")}\nExpertise: ${profile.expertise.join(", ")}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nAnswer in 1-3 sentences. Reference platform-specific knowledge only if directly relevant. No preamble.`;
       const raw = await callClaudeFast(prompt);
@@ -1545,6 +1676,9 @@ function MeetingApp({ profile, user, onEditProfile }) {
             <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" }}>Goal</span>
             <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
             {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
+            {!isMobile && meetingAudioSupported() && (
+              <MeetingAudioControl status={meetingAudioStatus} isListening={isListening} onConnect={connectMeetingAudio} onDisconnect={disconnectMeetingAudio} />
+            )}
           </div>
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", overflow: "auto", minHeight: 0 }}>
             <div style={{ background: "white", borderRight: "1px solid #DDD6FE", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1571,6 +1705,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
               </div>
             </div>
           </div>
+          <LiveTranscript entries={transcript} scrollRef={scrollRef} isListening={isListening} meetingAudioOn={meetingAudioStatus === "connected"} />
           <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0 }}>
             {chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "ai" && (
               <div style={{ padding: "10px 22px", background: "#F5F3FF", borderBottom: "1px solid #DDD6FE", display: "flex", gap: 10, alignItems: "flex-start" }}>
