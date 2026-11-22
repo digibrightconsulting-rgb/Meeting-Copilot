@@ -532,12 +532,164 @@ function SkillAdder({ onAdd }) {
   );
 }
 
+// ── MEETING SETUP GUIDE (onboarding + live screen) ───────────────────────
+const SETUP_GUIDES = {
+  meet: {
+    label: "Google Meet",
+    icon: "🟢",
+    intro: "Google Meet always runs in your browser, so it works straight away.",
+    sections: [
+      {
+        title: "In Chrome",
+        steps: [
+          "Join your Meet call in a Chrome tab.",
+          "Open Unmute in a separate tab or window, go to Live and press Start Listening.",
+          "Click 🔊 Hear the meeting.",
+          "In Chrome's share window, open the Chrome tab section and pick your Meet tab.",
+          "Make sure \"Also share tab audio\" is switched on, then click Share.",
+        ],
+      },
+    ],
+  },
+  zoom: {
+    label: "Zoom",
+    icon: "🔵",
+    intro: "Easiest in the browser. The Zoom desktop app also works on Windows.",
+    sections: [
+      {
+        title: "Zoom in the browser (recommended)",
+        steps: [
+          "Open the Zoom invite link. If the Zoom app tries to open, cancel it and click \"Join from your browser\".",
+          "In Unmute, go to Live, press Start Listening, then click 🔊 Hear the meeting.",
+          "Pick the Zoom tab and switch on \"Also share tab audio\", then click Share.",
+        ],
+      },
+      {
+        title: "Zoom desktop app (Windows)",
+        steps: [
+          "In Unmute, press Start Listening, then click 🔊 Hear the meeting.",
+          "Choose \"Entire screen\" and switch on \"Also share system audio\", then click Share.",
+        ],
+        note: "On a Mac, Chrome usually can't share system audio from desktop apps. Join from your browser instead.",
+      },
+    ],
+  },
+  teams: {
+    label: "Microsoft Teams",
+    icon: "🟣",
+    intro: "Easiest in the browser. The Teams desktop app also works on Windows.",
+    sections: [
+      {
+        title: "Teams in the browser (recommended)",
+        steps: [
+          "Open the Teams meeting link and choose \"Continue on this browser\" (or use teams.microsoft.com in Chrome).",
+          "In Unmute, go to Live, press Start Listening, then click 🔊 Hear the meeting.",
+          "Pick the Teams tab and switch on \"Also share tab audio\", then click Share.",
+        ],
+      },
+      {
+        title: "Teams desktop app (Windows)",
+        steps: [
+          "In Unmute, press Start Listening, then click 🔊 Hear the meeting.",
+          "Choose \"Entire screen\" and switch on \"Also share system audio\", then click Share.",
+        ],
+        note: "On a Mac, Chrome usually can't share system audio from desktop apps. Join from your browser instead.",
+      },
+    ],
+  },
+};
+
+const SETUP_TIPS = [
+  { icon: "🎧", text: "Wear headphones. Otherwise your microphone also picks up the other people and some lines may appear twice." },
+  { icon: "✅", text: "You'll know it's working when the green \"Hearing the meeting\" badge shows and lines marked THEM appear in the live transcript." },
+  { icon: "⏹", text: "Clicking \"Stop sharing\" in Chrome's bar stops Unmute hearing the meeting. Click 🔊 Hear the meeting to reconnect." },
+  { icon: "💻", text: "Use Chrome on a laptop or desktop. On your phone, use Boardroom mode for in-person meetings." },
+];
+
+function MeetingSetupGuide() {
+  const [tab, setTab] = useState("meet");
+  const guide = SETUP_GUIDES[tab];
+  return (
+    <div style={{ textAlign: "left" }}>
+      <div style={{ display: "flex", gap: 6, background: "#F5F3FF", borderRadius: 10, padding: 4, marginBottom: 16 }}>
+        {Object.entries(SETUP_GUIDES).map(([key, g]) => (
+          <button key={key} onClick={() => setTab(key)} style={{ flex: 1, background: tab === key ? "white" : "transparent", border: "none", borderRadius: 8, padding: "9px 6px", fontSize: 13, fontWeight: tab === key ? 700 : 500, color: tab === key ? "#3B0764" : "#7C6BA8", boxShadow: tab === key ? "0 1px 4px rgba(59,7,100,0.12)" : "none", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" }}>
+            <span style={{ marginRight: 5 }}>{g.icon}</span>{g.label}
+          </button>
+        ))}
+      </div>
+      <p style={{ margin: "0 0 14px", fontSize: 13, color: "#6b7280", lineHeight: 1.6 }}>{guide.intro}</p>
+      {guide.sections.map((sec, i) => (
+        <div key={i} style={{ border: "1px solid #EDE9FE", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "#3B0764", marginBottom: 10 }}>{sec.title}</div>
+          <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
+            {sec.steps.map((st, j) => (
+              <li key={j} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: j === sec.steps.length - 1 ? 0 : 8 }}>
+                <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: "#6D28D9", color: "white", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>{j + 1}</span>
+                <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{st}</span>
+              </li>
+            ))}
+          </ol>
+          {sec.note && <div style={{ marginTop: 10, fontSize: 12.5, color: "#6b7280", lineHeight: 1.55, background: "#F9FAFB", borderRadius: 8, padding: "8px 10px" }}>🍎 {sec.note}</div>}
+        </div>
+      ))}
+      <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12, padding: "12px 16px", marginTop: 4 }}>
+        {SETUP_TIPS.map((t, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, fontSize: 12.5, color: "#78350F", lineHeight: 1.55, marginBottom: i === SETUP_TIPS.length - 1 ? 0 : 7 }}>
+            <span style={{ flexShrink: 0 }}>{t.icon}</span><span>{t.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SetupGuideModal({ onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(30,16,51,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 200 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: 18, padding: "28px 30px", width: "100%", maxWidth: 600, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 12px 48px rgba(59,7,100,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", marginBottom: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Use Unmute in your calls</h2>
+          <button onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "#F5F3FF", border: "none", borderRadius: 8, width: 30, height: 30, fontSize: 16, color: "#6D28D9", cursor: "pointer" }}>×</button>
+        </div>
+        <p style={{ margin: "0 0 18px", fontSize: 13, color: "#6b7280", lineHeight: 1.6 }}>Unmute hears you through your microphone. To hear the other people too, share your meeting's audio once at the start of each call.</p>
+        <MeetingSetupGuide />
+      </div>
+    </div>
+  );
+}
+
+function AccountMenu({ name, role, onGuide, onEditProfile, onSignOut }) {
+  const [open, setOpen] = useState(false);
+  const initial = (name || "?").trim().charAt(0).toUpperCase();
+  const item = { display: "block", width: "100%", textAlign: "left", background: "white", border: "none", padding: "10px 16px", fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" };
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <button onClick={() => setOpen(o => !o)} title={`${name} · ${role}`} aria-label="Account menu" style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.2)", color: "white", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>{initial}</button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 99 }} />
+          <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", background: "white", border: "1px solid #DDD6FE", borderRadius: 12, overflow: "hidden", zIndex: 100, minWidth: 220, boxShadow: "0 8px 32px rgba(59,7,100,0.2)" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #F3F0FF" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1E1033" }}>{name}</div>
+              <div style={{ fontSize: 12, color: "#9B8FC0" }}>{role}</div>
+            </div>
+            <button style={item} onClick={() => { setOpen(false); onGuide(); }}>🎧 How to use in Zoom, Meet & Teams</button>
+            <button style={item} onClick={() => { setOpen(false); onEditProfile(); }}>✏️ Edit profile</button>
+            <button style={{ ...item, color: "#B91C1C", borderTop: "1px solid #F3F0FF" }} onClick={() => { setOpen(false); onSignOut(); }}>Sign out</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── ONBOARDING ─────────────────────────────────────────────────────────────
 function Onboarding({ onComplete, initialName = "" }) {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, name: initialName });
   const [consentGiven, setConsentGiven] = useState(false);
-  const totalSteps = 8;
+  const totalSteps = 10;
 
   const update = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
@@ -550,7 +702,6 @@ function Onboarding({ onComplete, initialName = "" }) {
     if (step === 1) return profile.name.trim() && profile.role.trim();
     if (step === 2) return profile.roleId !== "";
     if (step === 3) return profile.platforms.length > 0;
-    if (step === 7) return consentGiven;
     return true;
   };
 
@@ -566,7 +717,7 @@ function Onboarding({ onComplete, initialName = "" }) {
   };
 
   const Progress = () => {
-    const phase = step <= 3 ? "Setting up your profile…" : step <= 6 ? "Personalising your suggestions…" : "Almost ready…";
+    const phase = step <= 3 ? "Setting up your profile…" : step <= 6 ? "Personalising your suggestions…" : step === 8 ? "Using Unmute in your calls…" : "Almost ready…";
     return (
       <div style={{ marginBottom: 28 }}>
         <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
@@ -761,8 +912,19 @@ function Onboarding({ onComplete, initialName = "" }) {
           </Card>
         )}
 
-        {/* Step 8 — Tutorial + Consent */}
+        {/* Step 8 — Using Unmute with Meet / Zoom / Teams */}
         {step === 8 && (
+          <Card>
+            <Progress />
+            <H2>Using Unmute in your calls</H2>
+            <Sub>Unmute hears you through your microphone. To hear the other people too, you share your meeting's audio once at the start of each call. Pick the app you use most. You can find this guide again later in the menu at the top right.</Sub>
+            <MeetingSetupGuide />
+            <NavButtons disabled={false} />
+          </Card>
+        )}
+
+        {/* Step 9 — Tutorial + Consent */}
+        {step === 9 && (
           <Card>
             <Progress />
             <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>How it works</h2>
@@ -770,7 +932,7 @@ function Onboarding({ onComplete, initialName = "" }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 8 }}>
               {[
                 { icon: "⚙", color: "#2563eb", bg: "#eff6ff", title: "Before the call — Prep tab", desc: "Enter the meeting topic, who is on the call, and your goal. Click Generate and get a full brief — talking points, industry pulse, likely objections, and your close." },
-                { icon: "●", color: "#6D28D9", bg: "#F5F3FF", title: "During the call — Live tab", desc: "Open Unmute alongside your Zoom or Meet tab. Click Start Listening and AI suggestions appear in real time as people speak — platform-aware and tailored to you." },
+                { icon: "●", color: "#6D28D9", bg: "#F5F3FF", title: "During the call — Live tab", desc: "Open Unmute alongside your Zoom, Meet or Teams call. Click Start Listening, then 🔊 Hear the meeting so Unmute hears everyone. AI suggestions appear in real time as people speak — platform-aware and tailored to you." },
                 { icon: "💬", color: "#7c3aed", bg: "#f5f3ff", title: "Ask AI anything", desc: "Use the Ask AI bar at the bottom to instantly ask anything mid-call — How do I respond to that budget objection? What is a strong data point on Meta attribution? — get an expert answer in seconds." },
                 { icon: "📋", color: "#d97706", bg: "#fffbeb", title: "Copy any suggestion", desc: "Each card has a Copy button. Paste it into your notes or use it as a script for what to say next." },
               ].map((item, i) => (
@@ -983,7 +1145,16 @@ function SetNewPasswordScreen({ onDone }) {
 }
 
 // ── LIVE SESSION: meeting audio button + transcript ──────────────────────
-function MeetingAudioControl({ status, isListening, onConnect, onDisconnect }) {
+function MeetingAudioControl(props) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <MeetingAudioButton {...props} />
+      <button onClick={props.onHelp} title="How to use Unmute with Zoom, Meet or Teams" style={{ background: "none", border: "none", color: "#6D28D9", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>How?</button>
+    </div>
+  );
+}
+
+function MeetingAudioButton({ status, isListening, onConnect, onDisconnect }) {
   const chip = { display: "flex", alignItems: "center", gap: 7, borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", fontFamily: "'Plus Jakarta Sans', sans-serif" };
   if (status === "connected") {
     return (
@@ -1096,6 +1267,8 @@ export default function App() {
 function MeetingApp({ profile, user, onEditProfile }) {
   const [mode, setMode] = useState("hub");
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 820);
+  const [viewWidth, setViewWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1440);
+  const [showGuide, setShowGuide] = useState(false);
   const shouldListenRef = useRef(false);
   const [language, setLanguage] = useState(profile.language || LANGUAGES[0]);
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -1149,7 +1322,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 820);
+    const onResize = () => { setIsMobile(window.innerWidth < 820); setViewWidth(window.innerWidth); };
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
     return () => { window.removeEventListener("resize", onResize); window.removeEventListener("orientationchange", onResize); };
@@ -1560,36 +1733,33 @@ function MeetingApp({ profile, user, onEditProfile }) {
       {/* Header */}
       <div style={{ background: "#3B0764", padding: isMobile ? "10px 12px" : "0 22px", minHeight: 56, display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, flexShrink: 0, flexWrap: isMobile ? "wrap" : "nowrap" }}>
         <button onClick={() => setMode("hub")} style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", borderRadius: 8, width: 34, height: 34, fontSize: 17, flexShrink: 0, lineHeight: 1 }}>‹</button>
-        <div style={{ display: isMobile ? "none" : "flex", alignItems: "center", gap: 9, marginRight: 6 }}>
+        <div style={{ display: isMobile ? "none" : "flex", alignItems: "center", gap: 9, marginRight: 6, flexShrink: 0, whiteSpace: "nowrap" }}>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: "#7C3AED", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, color: "white" }}>U</div>
           <div>
             <div style={{ fontFamily: "'Fraunces', Georgia, serif", fontWeight: 700, fontSize: 15, color: "white", letterSpacing: "-0.01em", lineHeight: 1.2 }}>Unmute</div>
             <div style={{ fontSize: 9, color: "rgba(196,181,253,0.8)", letterSpacing: "0.05em" }}>for Marketers</div>
           </div>
         </div>
-        <div style={{ display: isMobile ? "none" : "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.1)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "rgba(196,181,253,0.9)" }}>
-          📣 {profile.name} · {profile.role}
-        </div>
-        {profile.platforms.length > 0 && !isMobile && (
+        {profile.platforms.length > 0 && viewWidth >= 1360 && (
           <div style={{ display: "flex", gap: 4 }}>
             {profile.platforms.slice(0, 4).map((p, i) => { const pl = PLATFORMS.find(x => x.label === p); return pl ? <span key={i} title={p} style={{ fontSize: 14 }}>{pl.icon}</span> : null; })}
             {profile.platforms.length > 4 && <span style={{ fontSize: 10, color: "rgba(196,181,253,0.6)", fontFamily: "monospace" }}>+{profile.platforms.length - 4}</span>}
           </div>
         )}
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.1)", borderRadius: 9, padding: 3, gap: 2, marginLeft: isMobile ? 0 : 8 }}>
+        <div style={{ display: "flex", background: "rgba(255,255,255,0.1)", borderRadius: 9, padding: 3, gap: 2, marginLeft: isMobile ? 0 : 8, flexShrink: 0 }}>
           {[{ key: "prep", label: "Prep" }, { key: "live", label: "Live" }, { key: "summary", label: "Summary" }].map(({ key, label }) => (
             <button key={key} onClick={() => setMode(key)} style={{ background: mode === key ? "rgba(255,255,255,0.18)" : "transparent", border: "none", color: mode === key ? "white" : "rgba(196,181,253,0.7)", borderRadius: 7, padding: "5px 14px", fontSize: 12, fontWeight: mode === key ? 600 : 400, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{label}</button>
           ))}
         </div>
         {mode === "live" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.1)", borderRadius: 20, padding: "4px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.1)", borderRadius: 20, padding: "4px 12px", flexShrink: 0, whiteSpace: "nowrap" }}>
             <div style={{ width: 7, height: 7, borderRadius: "50%", background: statusInfo[liveStatus].color, animation: ["listening","thinking"].includes(liveStatus) ? `pulse ${liveStatus === "thinking" ? "0.6s" : "2s"} infinite` : "none" }} />
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.9)", fontWeight: 500 }}>{statusInfo[liveStatus].label}</span>
-            {lastUpdated && <span style={{ fontSize: 10, color: "rgba(196,181,253,0.6)", marginLeft: 2 }}>· {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
+            {lastUpdated && viewWidth >= 1200 && <span style={{ fontSize: 10, color: "rgba(196,181,253,0.6)", marginLeft: 2 }}>· {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
           </div>
         )}
-        <div style={{ marginLeft: "auto", position: "relative", display: isMobile ? "none" : "block" }}>
-          <button onClick={() => setShowLangMenu(p => !p)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.9)", borderRadius: 8, padding: "5px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 7 }}>
+        <div style={{ marginLeft: "auto", position: "relative", display: isMobile ? "none" : "block", flexShrink: 0 }}>
+          <button onClick={() => setShowLangMenu(p => !p)} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.9)", borderRadius: 8, padding: "5px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 7, whiteSpace: "nowrap" }}>
             <span>{language.flag}</span><span style={{ fontWeight: 500 }}>{language.label}</span><span style={{ fontSize: 9, color: "rgba(196,181,253,0.6)" }}>▼</span>
           </button>
           {showLangMenu && (
@@ -1602,19 +1772,19 @@ function MeetingApp({ profile, user, onEditProfile }) {
             </div>
           )}
         </div>
-        <button onClick={() => setBoardroomMode(true)} style={{ background: "#7C3AED", border: "none", color: "white", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, marginLeft: isMobile ? "auto" : 0, flexShrink: 0 }}>📱 Boardroom</button>
-        <button onClick={onEditProfile} style={{ display: isMobile ? "none" : "block", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Edit Profile</button>
-        <button onClick={signOut} style={{ display: isMobile ? "none" : "block", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(196,181,253,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 11 }}>Sign out</button>
+        <button onClick={() => setBoardroomMode(true)} style={{ background: "#7C3AED", border: "none", color: "white", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, marginLeft: isMobile ? "auto" : 0, flexShrink: 0, whiteSpace: "nowrap" }}>📱 Boardroom</button>
         {mode === "live" && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={clearSession} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 12 }}>Clear</button>
-            <button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#FEE2E2" : "#EDE9FE", border: `1px solid ${isListening ? "#FCA5A5" : "#C4B5FD"}`, color: isListening ? "#DC2626" : "#6D28D9", borderRadius: 8, padding: "5px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button onClick={clearSession} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}>Clear</button>
+            <button onClick={isListening ? endMeeting : (sessionConsentGiven ? startListening : () => setShowConsentModal(true))} style={{ background: isListening ? "#FEE2E2" : "#EDE9FE", border: `1px solid ${isListening ? "#FCA5A5" : "#C4B5FD"}`, color: isListening ? "#DC2626" : "#6D28D9", borderRadius: 8, padding: "5px 16px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 7 , whiteSpace: "nowrap", flexShrink: 0}}>
               <div style={{ width: isListening ? 8 : 9, height: isListening ? 8 : 9, borderRadius: isListening ? 2 : "50%", background: isListening ? "#DC2626" : "#6D28D9", animation: isListening ? "pulse 1.2s infinite" : "none" }} />
               {isListening ? "End Meeting" : "Start Listening"}
             </button>
           </div>
         )}
+        <AccountMenu name={profile.name} role={profile.role} onGuide={() => setShowGuide(true)} onEditProfile={onEditProfile} onSignOut={signOut} />
       </div>
+      {showGuide && <SetupGuideModal onClose={() => setShowGuide(false)} />}
 
       {/* PREP MODE */}
       {mode === "prep" && (
@@ -1677,7 +1847,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
             <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
             {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
             {!isMobile && meetingAudioSupported() && (
-              <MeetingAudioControl status={meetingAudioStatus} isListening={isListening} onConnect={connectMeetingAudio} onDisconnect={disconnectMeetingAudio} />
+              <MeetingAudioControl status={meetingAudioStatus} isListening={isListening} onConnect={connectMeetingAudio} onDisconnect={disconnectMeetingAudio} onHelp={() => setShowGuide(true)} />
             )}
           </div>
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", overflow: "auto", minHeight: 0 }}>
