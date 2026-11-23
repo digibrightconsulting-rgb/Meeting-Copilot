@@ -26,7 +26,12 @@ export default async function handler(req, res) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.access_token) {
       console.error("Deepgram grant failed:", r.status, data);
-      return res.status(502).json({ error: "Could not start meeting transcription." });
+      const reason = data.err_msg || data.message || data.reason || "";
+      let error = `Deepgram refused the request (${r.status}${reason ? ": " + reason : ""}).`;
+      if (r.status === 401) error = "Deepgram rejected the API key. Check DEEPGRAM_API_KEY in Vercel matches a key in your Deepgram console.";
+      if (r.status === 403) error = "The Deepgram API key doesn't have enough permissions. Create a key with the Member role (or higher) and update DEEPGRAM_API_KEY in Vercel.";
+      if (r.status === 402) error = "Your Deepgram account is out of credit.";
+      return res.status(502).json({ error });
     }
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({ access_token: data.access_token });
