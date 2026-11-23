@@ -170,6 +170,17 @@ async function updatePassword(password) {
   if (!res.ok) throw new Error(friendlyAuthError(data, "Could not update your password. Please try again."));
 }
 
+// Live Industry Pulse: real, recent news found by web search (see api/pulse.js)
+async function fetchIndustryPulse(profile, topic, goal) {
+  const res = await authedFetch("/api/pulse", {
+    method: "POST",
+    body: JSON.stringify({ topic, goal, role: profile.role, company: profile.company, platforms: profile.platforms, expertise: profile.expertise }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !Array.isArray(data.items) || data.items.length === 0) throw new Error(data.error || "No recent news found.");
+  return data.items;
+}
+
 // Short-lived Deepgram token for live transcription (mic and meeting audio)
 async function getTranscriptionToken() {
   const res = await authedFetch("/api/stt-token", { method: "POST" });
@@ -488,18 +499,31 @@ const DEFAULT_STYLE = { border: "#94a3b8", bg: "#f8fafc", badge: "#f1f5f9", badg
 function SuggestionCard({ item, index, showNote }) {
   const [copied, setCopied] = useState(false);
   const s = TYPE_STYLES[item.type] || DEFAULT_STYLE;
-  const textToCopy = item.points ? "• " + item.points.join("\n• ") : item.text;
+  const textToCopy = item.points ? "• " + item.points.map((pt, i) => item.sources?.[i]?.url ? `${pt} (${item.sources[i].url})` : pt).join("\n• ") : item.text;
   const copy = () => { navigator.clipboard.writeText(textToCopy); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   return (
     <div style={{ background: s.bg, border: "1px solid #e5e7eb", borderLeft: `4px solid ${s.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 10, animation: `slideIn 0.25s ease ${index * 0.06}s both`, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
         <span style={{ background: s.badge, color: s.badgeText, fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", fontFamily: "monospace", padding: "2px 8px", borderRadius: 4 }}>{item.type}</span>
-        {item.type === "Industry Pulse" && <span style={{ fontSize: 10, color: "#7c3aed", fontFamily: "monospace" }}>⚡ latest trends</span>}
+        {item.type === "Industry Pulse" && (
+          <span style={{ fontSize: 10, color: item.pulseState === "fallback" ? "#9ca3af" : "#7c3aed", fontFamily: "monospace" }} title={item.pulseError || ""}>
+            {item.pulseState === "loading" ? "🔎 searching today's news…" : item.pulseState === "live" ? "🔎 live news" : item.pulseState === "fallback" ? "AI knowledge, may be dated" : "⚡ latest trends"}
+          </span>
+        )}
         <button onClick={copy} style={{ marginLeft: "auto", background: "white", border: "1px solid #d1d5db", color: "#6b7280", borderRadius: 5, padding: "2px 9px", fontSize: 11, cursor: "pointer", fontFamily: "monospace" }}>{copied ? "✓ Copied" : "Copy"}</button>
       </div>
       {item.points ? (
-        <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
-          {item.points.map((pt, i) => <li key={i} style={{ color: "#1f2937", fontSize: 13, lineHeight: 1.55, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 500 }}>{pt}</li>)}
+        <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6, textAlign: "left" }}>
+          {item.points.map((pt, i) => (
+            <li key={i} style={{ color: "#1f2937", fontSize: 13, lineHeight: 1.55, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: 500, opacity: item.pulseState === "loading" ? 0.45 : 1 }}>
+              {pt}
+              {item.sources?.[i]?.url && (
+                <a href={item.sources[i].url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginLeft: 6, fontSize: 11, color: "#7c3aed", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
+                  {item.sources[i].label || "source"} ↗
+                </a>
+              )}
+            </li>
+          ))}
         </ul>
       ) : (
         <p style={{ margin: 0, color: "#1f2937", fontSize: 13.5, lineHeight: 1.65, fontFamily: "'Georgia', serif" }}>{item.text}</p>
@@ -1339,15 +1363,42 @@ function MeetingApp({ profile, user, onEditProfile }) {
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [transcript]);
 
+  const prepRunRef = useRef(0);
   const generatePrep = async () => {
     if (!prepTopic.trim()) { setPrepError("Please enter a meeting topic."); return; }
+    const run = ++prepRunRef.current;
     setPrepLoading(true); setPrepError("");
+    // Start the live news search straight away; it's slower than the brief
+    const pulsePromise = fetchIndustryPulse(profile, prepTopic, prepGoal);
+    pulsePromise.catch(() => {}); // handled below
     try {
       const raw = await callClaude(buildPrepPrompt(profile, prepTopic, prepAttendees, prepGoal, prepConcerns, prepData));
-      setPrepPoints(safeParse(raw));
+      if (run !== prepRunRef.current) return;
+      const cards = safeParse(raw).map(c => c.type === "Industry Pulse" ? { ...c, pulseState: "loading" } : c);
+      setPrepPoints(cards);
       if (prepGoal) setSessionGoal(prepGoal);
-    } catch (e) { setPrepError("Error generating brief. Try again."); console.error(e); }
+    } catch (e) {
+      if (run === prepRunRef.current) { setPrepError("Error generating brief. Try again."); setPrepLoading(false); }
+      console.error(e); return;
+    }
     setPrepLoading(false);
+
+    // Swap in the live news when it arrives; fall back to the AI's own pulse if search fails
+    try {
+      const items = await pulsePromise;
+      if (run !== prepRunRef.current) return;
+      setPrepPoints(prev => prev.map(c => c.type !== "Industry Pulse" ? c : {
+        ...c,
+        pulseState: "live",
+        points: items.map(i => i.why ? `${i.headline} — ${i.why}` : i.headline),
+        sources: items.map(i => ({ label: [i.source, i.date].filter(Boolean).join(", "), url: i.url })),
+        note: "open with one of these",
+      }));
+    } catch (e) {
+      if (run !== prepRunRef.current) return;
+      console.warn("Industry Pulse search failed:", e.message);
+      setPrepPoints(prev => prev.map(c => c.type === "Industry Pulse" ? { ...c, pulseState: "fallback", pulseError: e.message } : c));
+    }
   };
 
   const saveMeeting = () => {
