@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { meetingAudioSupported, pickMeetingAudio, stopStream, streamIsLive, MeetingTranscriber, formatTranscript } from "./meetingAudio.js";
+import { meetingAudioSupported, micTranscriptionSupported, getMicStream, pickMeetingAudio, stopStream, streamIsLive, MeetingTranscriber, formatTranscript } from "./meetingAudio.js";
 
 // ── API ────────────────────────────────────────────────────────────────────
 async function callModel(model, maxTokens, prompt, fallback) {
@@ -170,6 +170,14 @@ async function updatePassword(password) {
   if (!res.ok) throw new Error(friendlyAuthError(data, "Could not update your password. Please try again."));
 }
 
+// Short-lived Deepgram token for live transcription (mic and meeting audio)
+async function getTranscriptionToken() {
+  const res = await authedFetch("/api/stt-token", { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) throw new Error(data.error || "Could not start live transcription.");
+  return data.access_token;
+}
+
 async function signOut() {
   const token = localStorage.getItem("unmute_access_token");
   if (token) {
@@ -311,80 +319,75 @@ const DEFAULT_PROFILE = {
 
 // ── PROMPTS ────────────────────────────────────────────────────────────────
 function buildLivePrompt(profile, transcript, goal, language, prepContext) {
-  const translateNote = language.code !== "en-US" ? `Transcript may be in ${language.label}. Translate to English first then generate suggestions.` : "";
-  const styleGuide = { "data-driven": "Back suggestions with specific numbers and evidence.", "strategic": "Frame around big picture direction and long-term impact.", "collaborative": "Build consensus and acknowledge others views.", "direct": "Short, plain, assertive — no hedging.", "diplomatic": "Tactful ways to make points without friction.", "adaptive": "Match the energy and tone of the room." }[profile.communicationStyle] || "Be confident and clear.";
-  const platformContext = profile.platforms.length > 0 ? `Active platforms: ${profile.platforms.join(", ")}. Draw on specific knowledge of these platforms — their attribution models, recent changes, algorithm updates, and best practices.` : "";
+  const translateNote = language.code !== "en-US" ? `The conversation may be in ${language.label}. Understand it in the original language, but write every suggestion in English.` : "";
+  const styleGuide = { "data-driven": "Use evidence and numbers when they are genuinely known; never invent figures.", "strategic": "Frame around big picture direction and long-term impact.", "collaborative": "Build consensus and acknowledge others views.", "direct": "Short, plain, assertive — no hedging.", "diplomatic": "Tactful ways to make points without friction.", "adaptive": "Match the energy and tone of the room." }[profile.communicationStyle] || "Be confident and clear.";
+  const speakerNote = transcript.includes("Them: ") ? `Lines starting "You:" are ${profile.name || "the user"}; lines starting "Them:" are the other people on the call.` : "";
 
-  const speakerNote = transcript.includes("Them: ") ? `Lines starting "You:" are what ${profile.name || "the user"} said; lines starting "Them:" are the other people on the call. Focus on responding to what the others just said or asked.` : "";
+  return `You are a real-time co-pilot whispering ideas to a marketing professional during a live meeting.
 
-  return `You are a real-time AI co-pilot for a marketing professional. Suggest what they should say RIGHT NOW.
+STEP 1 — Read the conversation below and work out the topic being discussed RIGHT NOW (the last few exchanges matter most; earlier lines are context). The topic can be anything — e.g. how to market when the stock market is down — and may be different from the planned agenda.
+STEP 2 — Give 3 suggestions that help them contribute to THAT topic: a sharp point to make, a smart question to ask, or a response to what someone just said.
 
-PROFILE:
-Name: ${profile.name}
-Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
-${profile.company ? "Company intelligence: Draw on everything you know about " + profile.company + " — their industry, business model, products, competitors and marketing context." : ""}
-${platformContext}
-Expertise: ${profile.expertise.join(", ")}
-Communication style: ${styleGuide}
-${profile.jobContext ? "Background: " + profile.jobContext : ""}
-${profile.meetingObjective ? "Typically trying to: " + profile.meetingObjective : ""}
-${goal ? "Session goal: " + goal : ""}
-${prepContext ? "Pre-meeting context: " + prepContext : ""}
-${translateNote}
+CONVERSATION (most recent last):
+"""
+${transcript}
+"""
 ${speakerNote}
+${translateNote}
 
-LAST 90 SECONDS:
-"${transcript}"
+BACKGROUND (use only where it genuinely fits the current topic — never steer the conversation back to it):
+Who they are: ${profile.role}${profile.company ? " at " + profile.company : ""}${profile.expertise?.length ? "; expertise in " + profile.expertise.join(", ") : ""}${profile.platforms?.length ? "; works with " + profile.platforms.join(", ") : ""}
+${profile.jobContext ? "Context: " + profile.jobContext : ""}
+${goal ? "Their goal for this meeting: " + goal : ""}
+${prepContext ? "Planned agenda: " + prepContext : ""}
+Style: ${styleGuide}
 
 RULES:
-1. Respond ONLY to what was just said — never force platform or expertise references if irrelevant
-2. Match their communication style
-3. 1-2 sentences max per suggestion
-4. All output in English
+1. Every suggestion must clearly relate to what was just discussed. If someone asked a question, one suggestion should answer it.
+2. Write what they could actually SAY — natural, spoken, 1–2 sentences. No jargon dumps.
+3. Never invent statistics, percentages or claims about their company's own data. General industry knowledge is fine.
+4. All output in English.
 
-Respond ONLY with a JSON array:
+Respond ONLY with a JSON array of 3 items:
 [
   { "type": "Talking Point", "text": "..." },
-  { "type": "Rebuttal", "text": "..." },
-  { "type": "Question", "text": "..." }
+  { "type": "Question", "text": "..." },
+  { "type": "Idea", "text": "..." }
 ]
-Types: Talking Point | Rebuttal | Data Insight | Question | Idea | Reframe | Close`;
+Types: Talking Point | Rebuttal | Question | Idea | Reframe | Close`;
 }
 
 function buildPrepPrompt(profile, topic, attendees, goal, concerns, data) {
-  const styleGuide = { "data-driven": "Back every point with specific numbers.", "strategic": "Focus on big picture and long-term.", "collaborative": "Build consensus, acknowledge others.", "direct": "Short and assertive — no hedging.", "diplomatic": "Tactful, avoid friction.", "adaptive": "Vary by who is in the room." }[profile.communicationStyle] || "Be confident and clear.";
-  const platformContext = profile.platforms.length > 0 ? `The user actively works on: ${profile.platforms.join(", ")}.` : "";
+  const styleGuide = { "data-driven": "Evidence-led, but only cite numbers that are provided below or are well-known public facts.", "strategic": "Focus on big picture and long-term.", "collaborative": "Build consensus, acknowledge others.", "direct": "Short and assertive — no hedging.", "diplomatic": "Tactful, avoid friction.", "adaptive": "Vary by who is in the room." }[profile.communicationStyle] || "Be confident and clear.";
 
-  return `You are preparing a marketing professional for an important meeting.
+  return `You are preparing a marketing professional for a meeting. Write a quick-glance brief they can scan in 30 seconds before and during the call: headlines and reminders, not an essay.
 
-PROFILE:
-Name: ${profile.name}
-Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
-${profile.company ? "Company intelligence: Draw on everything you know about " + profile.company + " to make talking points specific and credible." : ""}
-${platformContext}
-Expertise: ${profile.expertise.join(", ")}
-Style: ${styleGuide}
+WHO THEY ARE:
+${profile.name}, ${profile.role}${profile.company ? " at " + profile.company : ""}
+${profile.platforms?.length ? "Works with: " + profile.platforms.join(", ") : ""}
+${profile.expertise?.length ? "Expertise: " + profile.expertise.join(", ") : ""}
 ${profile.jobContext ? "Background: " + profile.jobContext : ""}
+Style: ${styleGuide}
 
-MEETING:
+THE MEETING:
 Topic: ${topic}
-Goal: ${goal}
-Attendees: ${attendees}
-Expected concerns: ${concerns}
-${data ? "Data / context: " + data : ""}
+${goal ? "Their goal: " + goal : ""}
+${attendees ? "Attendees: " + attendees : ""}
+${concerns ? "Expected concerns: " + concerns : ""}
+${data ? "Facts / data they provided: " + data : ""}
 
-Generate a concise marketing-focused pre-meeting brief. Keep every point SHORT — one punchy sentence max. No paragraphs.
+HOW TO WRITE IT:
+- Headlines, not detail. Each point is a reminder of what matters: max 15 words, one line.
+- Keep it broad and balanced. Cover the whole topic; don't go deep on one sub-area. If the topic has several themes, touch each.
+- NEVER invent statistics, percentages, benchmarks or claims about their company's own data or performance. Only use numbers from "Facts / data they provided". Otherwise speak qualitatively.
+- Industry Pulse comes first: 3 notable, real developments in marketing, advertising or measurement relevant to this meeting and their platforms. Only include things you are confident actually happened; avoid exact dates unless certain. One line each, saying what changed and why it matters.
 
-IMPORTANT: Include an Industry Pulse section with 2-3 current marketing industry developments (privacy changes, AI in advertising, platform updates, cookie deprecation, measurement shifts, algorithm changes) that are directly relevant to the meeting topic and the platforms they use. These should feel timely and show the person is across the latest.
-
-Respond ONLY with a JSON array:
+Respond ONLY with a JSON array in exactly this order:
 [
-  { "type": "Opening", "points": ["..."], "note": "when to use" },
-  { "type": "Key Arguments", "points": ["...", "...", "..."], "note": "lead with these" },
-  { "type": "Data Points", "points": ["...", "..."], "note": "have these ready" },
-  { "type": "Industry Pulse", "points": ["Recent development relevant to meeting...", "Another trend or change..."], "note": "show you are across the latest" },
-  { "type": "Anticipated Objection", "points": ["..."], "note": "be ready for this" },
-  { "type": "Rebuttal", "points": ["...", "..."], "note": "fire back with this" },
+  { "type": "Industry Pulse", "points": ["...", "...", "..."], "note": "open with one of these" },
+  { "type": "Key Messages", "points": ["...", "...", "..."], "note": "the 3 things to land" },
+  { "type": "Questions to Ask", "points": ["...", "..."], "note": "to steer the discussion" },
+  { "type": "Watch-outs", "points": ["Likely pushback → short response", "..."], "note": "be ready for these" },
   { "type": "Close / Ask", "points": ["..."], "note": "end on this" }
 ]`;
 }
@@ -469,6 +472,9 @@ const TYPE_STYLES = {
   "Data Point":      { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
   "Data Insight":    { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
   "Industry Pulse":  { border: "#7c3aed", bg: "#f5f3ff", badge: "#ede9fe", badgeText: "#6d28d9" },
+  "Key Messages":    { border: "#2563eb", bg: "#eff6ff", badge: "#dbeafe", badgeText: "#1d4ed8" },
+  "Questions to Ask":{ border: "#0891b2", bg: "#ecfeff", badge: "#cffafe", badgeText: "#0e7490" },
+  "Watch-outs":      { border: "#d97706", bg: "#fffbeb", badge: "#fef3c7", badgeText: "#b45309" },
   "Anticipated Objection": { border: "#d97706", bg: "#fffbeb", badge: "#fef3c7", badgeText: "#b45309" },
   "Question":        { border: "#7c3aed", bg: "#f5f3ff", badge: "#ede9fe", badgeText: "#6d28d9" },
   "Idea":            { border: "#0891b2", bg: "#ecfeff", badge: "#cffafe", badgeText: "#0e7490" },
@@ -1309,6 +1315,8 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const [summaryError, setSummaryError] = useState("");
 
   const recognitionRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const micTranscriberRef = useRef(null);
   const transcriptRef = useRef([]);
   const debounceRef = useRef(null);
   const runFetchRef = useRef(null);
@@ -1435,12 +1443,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     const transcriber = new MeetingTranscriber({
       stream,
       languageCode: language.code,
-      getToken: async () => {
-        const res = await authedFetch("/api/stt-token", { method: "POST" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.access_token) throw new Error(data.error || "Could not start meeting transcription.");
-        return data.access_token;
-      },
+      getToken: getTranscriptionToken,
       onFinal: (text) => {
         const entry = { id: Date.now() + Math.random(), text, speaker: "them" };
         transcriptRef.current = [...transcriptRef.current, entry];
@@ -1487,17 +1490,17 @@ function MeetingApp({ profile, user, onEditProfile }) {
   };
 
   // Stop everything when leaving the page
-  useEffect(() => () => { stopMeetingTranscriber(); stopStream(meetingStreamRef.current); }, []);
+  useEffect(() => () => {
+    stopMeetingTranscriber(); stopStream(meetingStreamRef.current);
+    if (micTranscriberRef.current) micTranscriberRef.current.stop();
+    stopStream(micStreamRef.current);
+  }, []);
 
   const pauseListening = () => {
     stopMeetingTranscriber(); // keep the shared tab so Start resumes without re-picking
     if (streamIsLive(meetingStreamRef.current)) setMeetingAudioStatus("paused");
     shouldListenRef.current = false;
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
+    stopMic();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setIsListening(false);
     setLiveStatus("idle");
@@ -1509,29 +1512,106 @@ function MeetingApp({ profile, user, onEditProfile }) {
       : [card, ...prev]);
   };
 
-  const startListening = useCallback(() => {
+  // ── Microphone ──────────────────────────────────────────────────────────
+  // Preferred: stream the mic to Deepgram (accurate, good with Hebrew/Arabic,
+  // doesn't depend on Chrome's Google speech servers). Fallback: Chrome's
+  // built-in Web Speech API, which now reconnects itself after network blips.
+  const addMicEntry = (text) => {
+    const entry = { id: Date.now() + Math.random(), text, speaker: "you" };
+    transcriptRef.current = [...transcriptRef.current, entry];
+    setTranscript(prev => [...prev, entry]);
+    scheduleRef.current();
+  };
+
+  const stopMic = () => {
+    if (micTranscriberRef.current) { const t = micTranscriberRef.current; micTranscriberRef.current = null; t.stop(); }
+    stopStream(micStreamRef.current); micStreamRef.current = null;
+    if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
+  };
+
+  const startWebSpeech = useCallback(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setLiveError("Use Chrome for voice recognition."); return; }
+    if (!SR) { setLiveError("Your browser doesn't support voice recognition. Please use Chrome."); setLiveStatus("error"); return; }
     const r = new SR();
     r.continuous = true; r.interimResults = true; r.lang = language.code;
-    r.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) { if (e.results[i].isFinal) { const entry = { id: Date.now() + Math.random(), text: e.results[i][0].transcript.trim(), speaker: "you" }; transcriptRef.current = [...transcriptRef.current, entry]; setTranscript(prev => [...prev, entry]); scheduleRef.current(); } } };
-    r.onerror = (e) => { if (e.error !== "no-speech") { setLiveError(`Mic: ${e.error}`); setLiveStatus("error"); } };
+    r.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          const text = e.results[i][0].transcript.trim();
+          if (text && text !== "-") addMicEntry(text);
+        }
+      }
+    };
+    r.onerror = (e) => {
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      if (e.error === "network") { setLiveError("Microphone connection dropped. Reconnecting…"); return; } // onend restarts it
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        shouldListenRef.current = false;
+        setLiveError("Unmute can't use your microphone. Allow microphone access in Chrome's address bar and try again.");
+        setLiveStatus("error");
+        return;
+      }
+      setLiveError(`Microphone problem (${e.error}). Reconnecting…`);
+    };
+    r.onstart = () => setLiveError(prev => (prev.startsWith("Microphone connection dropped") || prev.startsWith("Microphone problem")) ? "" : prev);
     r.onend = () => {
       // Only restart if we are genuinely still meant to be listening.
       // Prevents a runaway restart loop (which causes repeated Android chimes).
       if (shouldListenRef.current && recognitionRef.current === r) {
-        setTimeout(() => { try { r.start(); } catch (err) {} }, 400);
+        setTimeout(() => { if (shouldListenRef.current && recognitionRef.current === r) { try { r.start(); } catch { /* already started */ } } }, 600);
       }
     };
+    recognitionRef.current = r;
+    try { r.start(); } catch { /* already started */ }
+  }, [language]);
+
+  const startListening = useCallback(async () => {
     shouldListenRef.current = true;
-    r.start(); recognitionRef.current = r; setIsListening(true); setLiveStatus("listening"); setLiveError("");
+    setIsListening(true); setLiveStatus("listening"); setLiveError("");
+
+    let usingDeepgram = false;
+    if (micTranscriptionSupported()) {
+      try {
+        const micStream = await getMicStream();
+        if (!shouldListenRef.current) { stopStream(micStream); return; }
+        micStreamRef.current = micStream;
+        const transcriber = new MeetingTranscriber({
+          stream: micStream,
+          languageCode: language.code,
+          getToken: getTranscriptionToken,
+          retryHint: "Switched to Chrome's built-in speech recognition.",
+          onFinal: addMicEntry,
+          onStatus: (status, message) => {
+            if (micTranscriberRef.current !== transcriber) return;
+            if (status === "error") {
+              // Couldn't use Deepgram for the mic: fall back so the user still gets suggestions
+              micTranscriberRef.current = null;
+              stopStream(micStreamRef.current); micStreamRef.current = null;
+              setLiveError(`${message} Using Chrome's built-in speech recognition for your microphone instead.`);
+              if (shouldListenRef.current) startWebSpeech();
+            }
+          },
+        });
+        micTranscriberRef.current = transcriber;
+        transcriber.start();
+        usingDeepgram = true;
+      } catch (err) {
+        if (err?.name === "NotAllowedError") {
+          shouldListenRef.current = false;
+          setIsListening(false); setLiveStatus("error");
+          setLiveError("Unmute can't use your microphone. Allow microphone access in Chrome's address bar and try again.");
+          return;
+        }
+      }
+    }
+    if (!usingDeepgram) startWebSpeech();
     if (streamIsLive(meetingStreamRef.current) && !meetingTranscriberRef.current) startMeetingTranscriber(meetingStreamRef.current);
-  }, [language, startMeetingTranscriber]);
+  }, [language, startMeetingTranscriber, startWebSpeech]);
 
   const endMeeting = useCallback(() => {
     shouldListenRef.current = false;
     disconnectMeetingAudio();
-    if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
+    stopMic();
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setIsListening(false); setLiveStatus("idle");
     if (transcriptRef.current.length > 0) {
@@ -1869,7 +1949,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
                 <button onClick={fetchLiveSuggestions} disabled={transcript.length === 0} style={{ marginLeft: "auto", background: "#EDE9FE", border: "1px solid #C4B5FD", color: "#6D28D9", borderRadius: 7, padding: "4px 11px", fontSize: 11, fontFamily: "monospace", fontWeight: 600, opacity: transcript.length === 0 ? 0.35 : 1 }}>↻ Refresh</button>
               </div>
               <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
-                {liveSuggestions.length === 0 && liveStatus !== "thinking" && <div style={{ color: "#C4B5FD", fontSize: 12, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>💬</div>{transcript.length > 0 ? "Click ↻ Refresh or wait ~18s." : "Start listening to get real-time suggestions."}</div>}
+                {liveSuggestions.length === 0 && liveStatus !== "thinking" && <div style={{ color: "#C4B5FD", fontSize: 12, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>💬</div>{transcript.length > 0 ? "Click ↻ Refresh or keep talking." : "Start listening to get real-time suggestions."}</div>}
                 {liveSuggestions.map((s, i) => <SuggestionCard key={i} item={s} index={i} showNote={false} />)}
                 {liveError && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", color: "#dc2626", fontSize: 12, fontFamily: "monospace" }}>⚠ {liveError}</div>}
               </div>

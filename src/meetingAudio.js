@@ -17,6 +17,21 @@ const DEEPGRAM_LANG = {
 const MIME_TYPE = "audio/webm;codecs=opus";
 const MAX_RECONNECTS = 5;
 
+// True when we can stream the microphone to Deepgram (Chrome/Edge/Firefox desktop
+// and Android). Safari/iOS can't record WebM, so they fall back to Web Speech.
+export function micTranscriptionSupported() {
+  return typeof navigator !== "undefined"
+    && !!navigator.mediaDevices?.getUserMedia
+    && typeof MediaRecorder !== "undefined"
+    && MediaRecorder.isTypeSupported?.(MIME_TYPE);
+}
+
+export async function getMicStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+}
+
 export function meetingAudioSupported() {
   return typeof navigator !== "undefined"
     && !!navigator.mediaDevices?.getDisplayMedia
@@ -60,7 +75,8 @@ export function streamIsLive(stream) {
 
 // Streams one capture stream to Deepgram and reports finished sentences.
 export class MeetingTranscriber {
-  constructor({ stream, languageCode, getToken, onFinal, onStatus }) {
+  constructor({ stream, languageCode, getToken, onFinal, onStatus, retryHint }) {
+    this.retryHint = retryHint || "Click \"Hear the meeting\" to try again.";
     this.audioStream = new MediaStream(stream.getAudioTracks());
     this.language = DEEPGRAM_LANG[languageCode] || "en";
     this.getToken = getToken;
@@ -135,7 +151,7 @@ export class MeetingTranscriber {
       }
       if (this.reconnects >= MAX_RECONNECTS) {
         this.stopped = true;
-        this.onStatus("error", "Lost the connection to meeting transcription. Click \"Hear the meeting\" to try again.");
+        this.onStatus("error", `Lost the connection to live transcription. ${this.retryHint}`);
         return;
       }
       this.reconnects += 1;
