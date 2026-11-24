@@ -256,9 +256,17 @@ async function saveProfile(userId, profile) {
 }
 
 // How often live suggestions are requested (see triggerDebounced in MeetingApp)
+// Live mode: ideas & questions refresh at most every ~20s; talking points are
+// slower still (see TALKING_POINTS_TIMING) so the screen stays readable.
 const SUGGESTION_TIMING = {
-  live:      { quietMs: 2500, maxWaitMs: 7000,  minGapMs: 4000 },
+  live:      { quietMs: 5000, maxWaitMs: 25000, minGapMs: 20000 },
   boardroom: { quietMs: 4000, maxWaitMs: 12000, minGapMs: 8000 },
+};
+
+const TALKING_POINTS_TIMING = {
+  minGapMs: 60000,     // never more often than once a minute
+  minNewWords: 60,     // ...and only after a meaningful amount of new conversation
+  firstAfterWords: 40, // first set once there's enough to understand the topic
 };
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
@@ -329,43 +337,73 @@ const DEFAULT_PROFILE = {
 };
 
 // ── PROMPTS ────────────────────────────────────────────────────────────────
-function buildLivePrompt(profile, transcript, goal, language, prepContext) {
-  const translateNote = language.code !== "en-US" ? `The conversation may be in ${language.label}. Understand it in the original language, but write every suggestion in English.` : "";
-  const styleGuide = { "data-driven": "Use evidence and numbers when they are genuinely known; never invent figures.", "strategic": "Frame around big picture direction and long-term impact.", "collaborative": "Build consensus and acknowledge others views.", "direct": "Short, plain, assertive — no hedging.", "diplomatic": "Tactful ways to make points without friction.", "adaptive": "Match the energy and tone of the room." }[profile.communicationStyle] || "Be confident and clear.";
-  const speakerNote = transcript.includes("Them: ") ? `Lines starting "You:" are ${profile.name || "the user"}; lines starting "Them:" are the other people on the call.` : "";
+function profileBackground(profile) {
+  return [
+    `Role: ${profile.role}${profile.company ? " at " + profile.company : ""}`,
+    profile.expertise?.length ? `Expertise: ${profile.expertise.join(", ")}` : "",
+    profile.platforms?.length ? `Platforms they know deeply: ${profile.platforms.join(", ")}` : "",
+    profile.jobContext ? `Their work: ${profile.jobContext}` : "",
+    profile.typicalAudience ? `Who they usually meet with: ${profile.typicalAudience}` : "",
+    profile.meetingObjective ? `What they want from meetings: ${profile.meetingObjective}` : "",
+  ].filter(Boolean).join("\n");
+}
 
-  return `You are a real-time co-pilot whispering ideas to a marketing professional during a live meeting.
+// Deep, slow-changing talking points that let the user add real value
+function buildTalkingPointsPrompt(profile, transcript, goal, language, prepContext, previous) {
+  const translateNote = language.code !== "en-US" ? `The conversation may be in ${language.label}. Understand it in the original language, but write in English.` : "";
+  const speakerNote = transcript.includes("Them: ") ? `"You:" lines are ${profile.name || "the user"}; "Them:" lines are the other people.` : "";
+  const prev = previous?.topic ? `\nCURRENT TALKING POINTS ON SCREEN (topic: "${previous.topic}"):\n${previous.points.map(p => "- " + p.headline).join("\n")}\n` : "";
 
-STEP 1 — Read the conversation below and work out the topic being discussed RIGHT NOW (the last few exchanges matter most; earlier lines are context). The topic can be anything — e.g. how to market when the stock market is down — and may be different from the planned agenda.
-STEP 2 — Give 3 suggestions that help them contribute to THAT topic: a sharp point to make, a smart question to ask, or a response to what someone just said.
+  return `You are a senior advisor sitting beside ${profile.name || "a marketing professional"} in a live meeting. Your job: help them make a contribution that shows real depth and moves the discussion forward.
 
-CONVERSATION (most recent last):
+WHO THEY ARE (lean on this, it's what makes their contribution credible):
+${profileBackground(profile)}
+${goal ? "Their goal for this meeting: " + goal : ""}
+${prepContext ? "Planned agenda: " + prepContext : ""}
+
+CONVERSATION SO FAR (most recent last):
+"""
+${transcript}
+"""
+${speakerNote}
+${translateNote}
+${prev}
+THINK FIRST (don't output this): What is actually being discussed? What is the underlying question, tension or decision behind it? What does the room seem to be missing that someone with their experience would know?
+
+THEN write 2 talking points that:
+- Get to the core of the issue, not surface-level observations or generic tips.
+- Draw directly on their role, expertise and platforms. This is what lets THEM add value others in the room can't.
+- Are substantive: a framework, a trade-off, a lesson from their domain, a reframe, or a concrete recommendation.
+- Never invent statistics or claims about their company's own data or results.
+
+${previous?.topic ? `If the discussion is still on the same topic and the current talking points are still the right ones, respond with exactly {"changed": false}. Only replace them when the conversation has genuinely moved on or you have clearly better points.` : ""}
+
+Respond ONLY with JSON:
+{"changed": true, "topic": "what's being discussed, max 8 words", "points": [
+  {"headline": "the point in max 10 words", "detail": "2-3 sentences they could actually say, in natural spoken English", "angle": "max 15 words: why this lands coming from them (tie to their experience)"},
+  {"headline": "...", "detail": "...", "angle": "..."}
+]}`;
+}
+
+// Quick ideas and questions that can change more often
+function buildQuickPrompt(profile, transcript, language, topic, avoid) {
+  const translateNote = language.code !== "en-US" ? `The conversation may be in ${language.label}; write in English.` : "";
+  const speakerNote = transcript.includes("Them: ") ? `"You:" lines are ${profile.name || "the user"}; "Them:" lines are the other people.` : "";
+  return `You help ${profile.role}${profile.company ? " at " + profile.company : ""} during a live meeting${topic ? ` about "${topic}"` : ""}.
+
+LATEST CONVERSATION (most recent last):
 """
 ${transcript}
 """
 ${speakerNote}
 ${translateNote}
 
-BACKGROUND (use only where it genuinely fits the current topic — never steer the conversation back to it):
-Who they are: ${profile.role}${profile.company ? " at " + profile.company : ""}${profile.expertise?.length ? "; expertise in " + profile.expertise.join(", ") : ""}${profile.platforms?.length ? "; works with " + profile.platforms.join(", ") : ""}
-${profile.jobContext ? "Context: " + profile.jobContext : ""}
-${goal ? "Their goal for this meeting: " + goal : ""}
-${prepContext ? "Planned agenda: " + prepContext : ""}
-Style: ${styleGuide}
+Give 2 quick IDEAS (a suggestion, angle or example they could raise) and 2 QUESTIONS (smart questions they could ask the room), all about what was JUST discussed.
+- Short: ideas max 22 words, questions max 18 words. Natural spoken English.
+- No invented statistics.
+${avoid.length ? `- Don't repeat or rephrase any of these already shown:\n${avoid.map(a => "  • " + a).join("\n")}` : ""}
 
-RULES:
-1. Every suggestion must clearly relate to what was just discussed. If someone asked a question, one suggestion should answer it.
-2. Write what they could actually SAY — natural, spoken, 1–2 sentences. No jargon dumps.
-3. Never invent statistics, percentages or claims about their company's own data. General industry knowledge is fine.
-4. All output in English.
-
-Respond ONLY with a JSON array of 3 items:
-[
-  { "type": "Talking Point", "text": "..." },
-  { "type": "Question", "text": "..." },
-  { "type": "Idea", "text": "..." }
-]
-Types: Talking Point | Rebuttal | Question | Idea | Reframe | Close`;
+Respond ONLY with JSON: {"ideas": ["...", "..."], "questions": ["...", "..."]}`;
 }
 
 function buildPrepPrompt(profile, topic, attendees, goal, concerns, data) {
@@ -444,7 +482,7 @@ Respond ONLY with a JSON array, no markdown:
 ]`;
 }
 
-function buildSummaryPrompt(profile, transcript, goal, prepTopic, prepAttendees) {
+function buildSummaryPrompt(profile, transcript, goal, prepTopic, prepAttendees, pins = []) {
   return `You are debriefing a marketing professional after a meeting.
 
 PROFILE:
@@ -457,6 +495,7 @@ Expertise: ${profile.expertise.join(", ")}
 MEETING:
 Topic: ${prepTopic || "Not specified"}
 Attendees: ${prepAttendees || "Not specified"}
+${pins.length ? "Items the user PINNED during the meeting as important (make sure the summary and follow-ups reflect these):\n" + pins.map(p => `- [${p.kind}] ${p.text}`).join("\n") : ""}
 Goal: ${goal || "Not specified"}
 
 TRANSCRIPT:
@@ -1239,6 +1278,140 @@ function LiveTranscript({ entries, scrollRef, isListening, meetingAudioOn }) {
   );
 }
 
+// ── LIVE BOARD COMPONENTS ─────────────────────────────────────────────────
+const panelHeader = { padding: "10px 18px", borderBottom: "1px solid #EDE9FE", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "white" };
+const panelTitle = { fontSize: 11, color: "#5B21B6", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 };
+const smallBtn = { background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#6D28D9", borderRadius: 7, padding: "3px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", whiteSpace: "nowrap" };
+const timeLabel = (d) => d ? new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+
+function Spin({ color = "#7C3AED" }) {
+  return <div style={{ width: 12, height: 12, border: `2px solid ${color}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />;
+}
+
+function PinButton({ pinned, onClick }) {
+  return (
+    <button onClick={onClick} disabled={pinned} title={pinned ? "Pinned" : "Pin to your board"} aria-label={pinned ? "Pinned" : "Pin"}
+      style={{ background: pinned ? "#FEF3C7" : "white", border: `1px solid ${pinned ? "#FCD34D" : "#E5E7EB"}`, borderRadius: 7, padding: "3px 8px", fontSize: 12, cursor: pinned ? "default" : "pointer", flexShrink: 0, color: pinned ? "#92400E" : "#6b7280", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+      📌{pinned ? " Pinned" : ""}
+    </button>
+  );
+}
+
+function PendingNote({ show, what }) {
+  if (!show) return null;
+  return <div style={{ margin: "0 0 10px", background: "#EDE9FE", color: "#5B21B6", fontSize: 11.5, fontWeight: 600, borderRadius: 8, padding: "6px 10px" }}>New {what} ready. They'll appear when you move your mouse away.</div>;
+}
+
+function TalkingPointsPanel({ talking, loading, isListening, hasTranscript, pending, onHover, onRefresh, onPin, pinnedTexts }) {
+  return (
+    <div onMouseEnter={() => onHover(true)} onMouseLeave={() => onHover(false)} style={{ textAlign: "left", background: "#FAFAFF", borderRight: "1px solid #DDD6FE", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={panelHeader}>
+        <span style={{ fontSize: 14 }}>🎯</span>
+        <span style={panelTitle}>Talking points</span>
+        {loading && <Spin />}
+        {talking?.at && <span style={{ fontSize: 10.5, color: "#A78BFA" }}>updated {timeLabel(talking.at)}</span>}
+        <button onClick={onRefresh} disabled={!hasTranscript || loading} style={{ ...smallBtn, marginLeft: "auto", opacity: !hasTranscript || loading ? 0.5 : 1 }}>↻ New points</button>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
+        <PendingNote show={pending} what="talking points" />
+        {talking?.topic && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#3B0764", color: "white", borderRadius: 20, padding: "5px 12px", fontSize: 12, fontWeight: 600, marginBottom: 14 }}>
+            <span style={{ opacity: 0.7, fontWeight: 500 }}>Now discussing:</span> {talking.topic}
+          </div>
+        )}
+        {!talking && (
+          <div style={{ color: "#A78BFA", fontSize: 13, textAlign: "center", paddingTop: 40, lineHeight: 1.7 }}>
+            <div style={{ fontSize: 30, marginBottom: 8 }}>🎯</div>
+            {loading ? "Understanding the conversation…" : isListening ? "Your talking points will appear once Unmute understands what's being discussed (usually within a minute)." : "Press Start Listening to begin."}
+          </div>
+        )}
+        {talking?.points.map((pt, i) => (
+          <div key={pt.id || i} style={{ background: "white", border: "1px solid #E9E5FB", borderLeft: "4px solid #6D28D9", borderRadius: 12, padding: "16px 18px", marginBottom: 14, boxShadow: "0 1px 4px rgba(59,7,100,0.06)", animation: "slideIn 0.3s ease both" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "#1E1033", lineHeight: 1.35, flex: 1 }}>{pt.headline}</div>
+              <PinButton pinned={pinnedTexts.includes(`${pt.headline}: ${pt.detail}`)} onClick={() => onPin(pt)} />
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: "#374151", lineHeight: 1.65 }}>{pt.detail}</p>
+            {pt.angle && <div style={{ marginTop: 10, fontSize: 12, color: "#6D28D9", background: "#F5F3FF", borderRadius: 8, padding: "6px 10px", lineHeight: 1.5 }}>Your angle: {pt.angle}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuickPanel({ title, icon, accent, kind, items, at, loading, pending, onHover, onRefresh, onPin, pinnedTexts, hasTranscript }) {
+  return (
+    <div onMouseEnter={() => onHover(true)} onMouseLeave={() => onHover(false)} style={{ textAlign: "left", display: "flex", flexDirection: "column", minHeight: 0, borderBottom: kind === "Idea" ? "1px solid #DDD6FE" : "none", background: "#F5F3FF" }}>
+      <div style={panelHeader}>
+        <span style={{ fontSize: 13 }}>{icon}</span>
+        <span style={{ ...panelTitle, color: accent }}>{title}</span>
+        {loading && <Spin color={accent} />}
+        {at && <span style={{ fontSize: 10.5, color: "#A78BFA" }}>{timeLabel(at)}</span>}
+        {kind === "Idea" && <button onClick={onRefresh} disabled={!hasTranscript || loading} style={{ ...smallBtn, marginLeft: "auto", opacity: !hasTranscript || loading ? 0.5 : 1 }}>↻ Refresh</button>}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+        <PendingNote show={pending} what={kind === "Idea" ? "ideas" : "questions"} />
+        {items.length === 0 && <div style={{ color: "#C4B5FD", fontSize: 12, fontStyle: "italic", textAlign: "center", paddingTop: 16 }}>{kind === "Idea" ? "Ideas" : "Questions"} will appear as people talk.</div>}
+        {items.map((t, i) => (
+          <div key={t} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "white", border: "1px solid #E9E5FB", borderLeft: `3px solid ${accent}`, borderRadius: 10, padding: "11px 12px", marginBottom: 9, animation: `slideIn 0.25s ease ${i * 0.05}s both` }}>
+            <span style={{ flex: 1, fontSize: 13.5, color: "#1F2937", lineHeight: 1.55 }}>{t}</span>
+            <PinButton pinned={pinnedTexts.includes(t)} onClick={() => onPin(t)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const PIN_COLORS = { "Idea": "#FEF9C3", "Question": "#CFFAFE", "Talking point": "#EDE9FE" };
+const PIN_TILTS = [-1.2, 0.8, -0.5, 1.1, -0.9, 0.4];
+
+function PinBoard({ pins, onUnpin }) {
+  return (
+    <div style={{ textAlign: "left", background: "#FFFDF5", display: "flex", flexDirection: "column", minHeight: 0, borderLeft: "1px solid #F3E8C9" }}>
+      <div style={{ ...panelHeader, background: "#FFFBEB", borderBottom: "1px solid #F3E8C9" }}>
+        <span style={{ fontSize: 13 }}>📌</span>
+        <span style={{ ...panelTitle, color: "#92400E" }}>Pinned</span>
+        {pins.length > 0 && <span style={{ marginLeft: "auto", background: "#FEF3C7", color: "#92400E", fontSize: 10.5, fontWeight: 700, borderRadius: 10, padding: "1px 8px" }}>{pins.length}</span>}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 20px" }}>
+        {pins.length === 0 && (
+          <div style={{ color: "#B45309", opacity: 0.7, fontSize: 12.5, textAlign: "center", paddingTop: 24, lineHeight: 1.7 }}>
+            Click 📌 on any idea, question or talking point to keep it here for later in the meeting.
+          </div>
+        )}
+        {pins.map((p, i) => (
+          <div key={p.id} style={{ position: "relative", background: PIN_COLORS[p.kind] || "#FEF9C3", borderRadius: 4, padding: "12px 12px 10px", marginBottom: 14, boxShadow: "0 3px 8px rgba(120,53,15,0.12)", transform: `rotate(${PIN_TILTS[i % PIN_TILTS.length]}deg)` }}>
+            <button onClick={() => onUnpin(p.id)} title="Unpin" aria-label="Unpin" style={{ position: "absolute", top: 4, right: 6, background: "none", border: "none", fontSize: 15, color: "#92400E", cursor: "pointer", opacity: 0.6, lineHeight: 1 }}>×</button>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#78350F", opacity: 0.75, marginBottom: 5 }}>{p.kind} · {timeLabel(p.at)}</div>
+            <div style={{ fontSize: 13, color: "#1F2937", lineHeight: 1.5, paddingRight: 10 }}>{p.text}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BriefDrawer({ points, onClose, onGoToPrep }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(30,16,51,0.3)", zIndex: 150 }}>
+      <div onClick={e => e.stopPropagation()} style={{ textAlign: "left", position: "absolute", top: 0, left: 0, bottom: 0, width: "min(460px, 92vw)", background: "white", boxShadow: "8px 0 32px rgba(59,7,100,0.2)", display: "flex", flexDirection: "column", animation: "slideIn 0.2s ease" }}>
+        <div style={{ ...panelHeader, padding: "14px 18px" }}>
+          <span style={{ fontSize: 14 }}>📝</span>
+          <span style={panelTitle}>Pre-meeting brief</span>
+          <button onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "#F5F3FF", border: "none", borderRadius: 8, width: 28, height: 28, fontSize: 15, color: "#6D28D9", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
+          {points.length === 0
+            ? <div style={{ color: "#A78BFA", fontSize: 13, textAlign: "center", paddingTop: 30, lineHeight: 1.7 }}>No brief yet.<br /><button onClick={onGoToPrep} style={{ ...smallBtn, marginTop: 10 }}>Go to Prep</button></div>
+            : points.map((p, i) => <SuggestionCard key={i} item={p} index={i} showNote={true} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
@@ -1323,7 +1496,21 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const [sessionGoal, setSessionGoal] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState([]);
-  const [liveSuggestions, setLiveSuggestions] = useState([]);
+  // Live board: deep talking points (slow), quick ideas & questions, pinned notes
+  const [talking, setTalking] = useState(null);         // { topic, points: [{headline, detail, angle}], at }
+  const [talkingLoading, setTalkingLoading] = useState(false);
+  const [quick, setQuick] = useState({ ideas: [], questions: [], at: null });
+  const [quickLoading, setQuickLoading] = useState(false);
+  const [pins, setPins] = useState(() => { try { return JSON.parse(localStorage.getItem("unmute_pins") || "[]"); } catch { return []; } });
+  const [showBrief, setShowBrief] = useState(false);
+  const [pendingFlags, setPendingFlags] = useState({ talking: false, quick: false });
+  const hoverRef = useRef({ talking: false, quick: false });
+  const pendingRef = useRef({ talking: null, quick: null });
+  const talkingRef = useRef(null);
+  const quickRef = useRef({ ideas: [], questions: [] });
+  const pinsRef = useRef([]);
+  const talkingInFlightRef = useRef(false);
+  const talkingMetaRef = useRef({ lastAt: 0, lastLen: 0 });
   const [liveStatus, setLiveStatus] = useState("idle");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [liveError, setLiveError] = useState("");
@@ -1412,18 +1599,89 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const loadMeeting = (m) => { setPrepTopic(m.topic); setPrepAttendees(m.attendees); setPrepGoal(m.goal); setPrepConcerns(m.concerns); setPrepData(m.data); setShowPlanner(false); };
   const deleteMeeting = (id) => { const u = savedMeetings.filter(m => m.id !== id); setSavedMeetings(u); localStorage.setItem("unmute_mkt_meetings", JSON.stringify(u)); };
 
-  const fetchLiveSuggestions = useCallback(async () => {
+  // ── Live board updates ──────────────────────────────────────────────────
+  useEffect(() => { talkingRef.current = talking; }, [talking]);
+  useEffect(() => { quickRef.current = quick; }, [quick]);
+  useEffect(() => { pinsRef.current = pins; try { localStorage.setItem("unmute_pins", JSON.stringify(pins)); } catch { /* storage full/blocked */ } }, [pins]);
+
+  // Don't change a panel while the user is reading it (mouse over it): hold the
+  // update and apply it when they move away.
+  const applyOrHold = (panel, apply) => {
+    if (hoverRef.current[panel]) {
+      pendingRef.current[panel] = apply;
+      setPendingFlags(f => ({ ...f, [panel]: true }));
+    } else apply();
+  };
+  const setHover = (panel, on) => {
+    hoverRef.current[panel] = on;
+    if (!on && pendingRef.current[panel]) {
+      const apply = pendingRef.current[panel];
+      pendingRef.current[panel] = null;
+      setPendingFlags(f => ({ ...f, [panel]: false }));
+      apply();
+    }
+  };
+
+  const wordCount = (entries) => entries.reduce((n, e) => n + e.text.split(/\s+/).filter(Boolean).length, 0);
+
+  const fetchTalkingPoints = useCallback(async ({ force = false } = {}) => {
+    if (talkingInFlightRef.current) return;
+    const all = transcriptRef.current;
+    if (wordCount(all) < 15) return;
+    talkingInFlightRef.current = true;
+    talkingMetaRef.current = { lastAt: Date.now(), lastLen: all.length };
+    setTalkingLoading(true);
+    try {
+      const prepContext = prepTopic ? `${prepTopic}${prepGoal ? ". Goal: " + prepGoal : ""}` : "";
+      const previous = force ? null : talkingRef.current;
+      const raw = await callClaude(buildTalkingPointsPrompt(profile, formatTranscript(all.slice(-40)), sessionGoal, language, prepContext, previous));
+      const data = safeParse(raw);
+      if (data && data.changed !== false && Array.isArray(data.points) && data.points.length) {
+        const next = { topic: data.topic || "", points: data.points.slice(0, 2).map(p => ({ ...p, id: Date.now() + Math.random() })), at: new Date() };
+        applyOrHold("talking", () => setTalking(next));
+      } else if (talkingRef.current) {
+        applyOrHold("talking", () => setTalking(t => t ? { ...t, at: new Date() } : t));
+      }
+    } catch (e) { console.error("Talking points error:", e); }
+    talkingInFlightRef.current = false;
+    setTalkingLoading(false);
+  }, [profile, sessionGoal, language, prepTopic, prepGoal]);
+
+  const fetchQuick = useCallback(async () => {
     const recent = formatTranscript(transcriptRef.current.slice(-15));
     if (recent.trim().length < 20) return;
-    setLiveStatus("thinking");
+    setQuickLoading(true); setLiveStatus("thinking");
     try {
-      const prepContext = prepTopic ? `Meeting: ${prepTopic}. Goal: ${prepGoal}` : "";
-      const raw = await callClaudeFast(buildLivePrompt(profile, recent, sessionGoal, language, prepContext));
-      setLiveSuggestions(JSON.parse(raw));
-      setLastUpdated(new Date());
+      const avoid = [...quickRef.current.ideas, ...quickRef.current.questions, ...pinsRef.current.map(p => p.text)].slice(-14);
+      const raw = await callClaudeFast(buildQuickPrompt(profile, recent, language, talkingRef.current?.topic, avoid));
+      const data = safeParse(raw);
+      if (data && (data.ideas?.length || data.questions?.length)) {
+        const next = { ideas: (data.ideas || []).slice(0, 2), questions: (data.questions || []).slice(0, 2), at: new Date() };
+        applyOrHold("quick", () => setQuick(next));
+        setLastUpdated(new Date());
+      }
       setLiveStatus("listening");
     } catch (e) { console.error(e); setLiveStatus("error"); setLiveError("Could not fetch suggestions."); }
-  }, [sessionGoal, language, prepTopic, prepGoal, profile]);
+    setQuickLoading(false);
+  }, [profile, language]);
+
+  // One "round" of live updates: quick ideas/questions every time, deep talking
+  // points only when enough time AND enough new conversation has passed.
+  const fetchLiveSuggestions = useCallback(async () => {
+    const all = transcriptRef.current;
+    const { lastAt, lastLen } = talkingMetaRef.current;
+    const newWords = wordCount(all.slice(lastLen));
+    const due = !talkingRef.current
+      ? wordCount(all) >= TALKING_POINTS_TIMING.firstAfterWords
+      : Date.now() - lastAt >= TALKING_POINTS_TIMING.minGapMs && newWords >= TALKING_POINTS_TIMING.minNewWords;
+    if (due) fetchTalkingPoints();
+    await fetchQuick();
+  }, [fetchQuick, fetchTalkingPoints]);
+
+  const pinItem = (kind, text, extra = {}) => {
+    setPins(prev => prev.some(p => p.text === text) ? prev : [{ id: Date.now() + Math.random(), kind, text, at: new Date().toISOString(), ...extra }, ...prev]);
+  };
+  const unpinItem = (id) => setPins(prev => prev.filter(p => p.id !== id));
 
   const fetchBoardroomCards = useCallback(async () => {
     const recent = formatTranscript(transcriptRef.current.slice(-25));
@@ -1676,7 +1934,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
   const generateSummary = async () => {
     if (transcript.length === 0) { setSummaryError("No transcript yet — run a live session first."); return; }
     setSummaryLoading(true); setSummaryError("");
-    try { const raw = await callClaudeLong(buildSummaryPrompt(profile, transcript, sessionGoal, prepTopic, prepAttendees)); setSummary(safeParse(raw)); } catch (e) { setSummaryError("Error generating summary. Please try again."); console.error(e); }
+    try { const raw = await callClaudeLong(buildSummaryPrompt(profile, transcript, sessionGoal, prepTopic, prepAttendees, pins)); setSummary(safeParse(raw)); } catch (e) { setSummaryError("Error generating summary. Please try again."); console.error(e); }
     setSummaryLoading(false);
   };
 
@@ -1696,7 +1954,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
     setChatLoading(false);
   };
 
-  const clearSession = () => { transcriptRef.current = []; lastSentLenRef.current = 0; firstPendingAtRef.current = null; setTranscript([]); setLiveSuggestions([]); setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
+  const clearSession = () => { transcriptRef.current = []; lastSentLenRef.current = 0; firstPendingAtRef.current = null; setTranscript([]); setTalking(null); setQuick({ ideas: [], questions: [], at: null }); setPins([]); talkingMetaRef.current = { lastAt: 0, lastLen: 0 }; setLastUpdated(null); setLiveStatus(isListening ? "listening" : "idle"); };
   const statusInfo = { idle: { color: "#9ca3af", label: "Ready" }, listening: { color: "#16a34a", label: "Listening" }, thinking: { color: "#d97706", label: "Analysing…" }, error: { color: "#dc2626", label: "Error" } };
 
   // ── BOARDROOM MODE — full screen, minimal, mobile-first ──────────────────
@@ -1977,35 +2235,37 @@ function MeetingApp({ profile, user, onEditProfile }) {
             <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" }}>Goal</span>
             <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
             {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
+            <button onClick={() => setShowBrief(true)} title="Open your pre-meeting brief" style={{ background: "white", border: "1px solid #C4B5FD", color: "#5B21B6", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+              📝 Brief{prepPoints.length ? "" : " (empty)"}
+            </button>
             {!isMobile && meetingAudioSupported() && (
               <MeetingAudioControl status={meetingAudioStatus} isListening={isListening} onConnect={connectMeetingAudio} onDisconnect={disconnectMeetingAudio} onHelp={() => setShowGuide(true)} />
             )}
           </div>
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", overflow: "auto", minHeight: 0 }}>
-            <div style={{ background: "white", borderRight: "1px solid #DDD6FE", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <div style={{ background: "#F5F3FF", padding: "11px 20px", borderBottom: "1px solid #DDD6FE", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#2563eb" }} />
-                <span style={{ fontSize: 11, color: "#5B21B6", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Pre-Meeting Brief</span>
-                <span style={{ marginLeft: "auto", background: "#EDE9FE", color: "#6D28D9", fontSize: 10, fontFamily: "monospace", fontWeight: 700, padding: "1px 8px", borderRadius: 10 }}>{prepPoints.length} pts</span>
-              </div>
-              <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
-                {prepPoints.length === 0 ? <div style={{ color: "#C4B5FD", fontSize: 12, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>📝</div>No brief yet — go to Prep tab.</div> : prepPoints.map((p, i) => <SuggestionCard key={i} item={p} index={i} showNote={true} />)}
-              </div>
+          {liveError && <div style={{ background: "#fef2f2", borderBottom: "1px solid #fca5a5", padding: "8px 22px", color: "#b91c1c", fontSize: 12, flexShrink: 0 }}>⚠ {liveError}</div>}
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.35fr) minmax(0, 1fr) 280px", overflow: isMobile ? "auto" : "hidden", minHeight: 0 }}>
+            <TalkingPointsPanel
+              talking={talking} loading={talkingLoading} isListening={isListening} hasTranscript={transcript.length > 0}
+              pending={pendingFlags.talking} onHover={on => setHover("talking", on)}
+              onRefresh={() => fetchTalkingPoints({ force: true })}
+              onPin={(pt) => pinItem("Talking point", `${pt.headline}: ${pt.detail}`)}
+              pinnedTexts={pins.map(p => p.text)}
+            />
+            <div style={{ display: "grid", gridTemplateRows: "1fr 1fr", minHeight: 0, borderRight: isMobile ? "none" : "1px solid #DDD6FE" }}>
+              <QuickPanel
+                title="Ideas" icon="💡" accent="#d97706" kind="Idea" items={quick.ideas} at={quick.at} loading={quickLoading}
+                pending={pendingFlags.quick} onHover={on => setHover("quick", on)} onRefresh={fetchQuick}
+                onPin={(t) => pinItem("Idea", t)} pinnedTexts={pins.map(p => p.text)} hasTranscript={transcript.length > 0}
+              />
+              <QuickPanel
+                title="Questions" icon="❓" accent="#0891b2" kind="Question" items={quick.questions} at={quick.at} loading={quickLoading}
+                pending={pendingFlags.quick} onHover={on => setHover("quick", on)} onRefresh={fetchQuick}
+                onPin={(t) => pinItem("Question", t)} pinnedTexts={pins.map(p => p.text)} hasTranscript={transcript.length > 0}
+              />
             </div>
-            <div style={{ background: "#F5F3FF", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <div style={{ background: "white", padding: "11px 20px", borderBottom: "1px solid #DDD6FE", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", animation: isListening ? "pulse 2s infinite" : "none" }} />
-                <span style={{ fontSize: 11, color: "#5B21B6", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Live Suggestions</span>
-                {liveStatus === "thinking" && <div style={{ width: 12, height: 12, border: "2px solid #7C3AED", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", marginLeft: 2 }} />}
-                <button onClick={fetchLiveSuggestions} disabled={transcript.length === 0} style={{ marginLeft: "auto", background: "#EDE9FE", border: "1px solid #C4B5FD", color: "#6D28D9", borderRadius: 7, padding: "4px 11px", fontSize: 11, fontFamily: "monospace", fontWeight: 600, opacity: transcript.length === 0 ? 0.35 : 1 }}>↻ Refresh</button>
-              </div>
-              <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
-                {liveSuggestions.length === 0 && liveStatus !== "thinking" && <div style={{ color: "#C4B5FD", fontSize: 12, fontStyle: "italic", textAlign: "center", paddingTop: 24, lineHeight: 1.8 }}><div style={{ fontSize: 28, marginBottom: 10 }}>💬</div>{transcript.length > 0 ? "Click ↻ Refresh or keep talking." : "Start listening to get real-time suggestions."}</div>}
-                {liveSuggestions.map((s, i) => <SuggestionCard key={i} item={s} index={i} showNote={false} />)}
-                {liveError && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", color: "#dc2626", fontSize: 12, fontFamily: "monospace" }}>⚠ {liveError}</div>}
-              </div>
-            </div>
+            <PinBoard pins={pins} onUnpin={unpinItem} />
           </div>
+          {showBrief && <BriefDrawer points={prepPoints} onClose={() => setShowBrief(false)} onGoToPrep={() => { setShowBrief(false); setMode("prep"); }} />}
           <LiveTranscript entries={transcript} scrollRef={scrollRef} isListening={isListening} meetingAudioOn={meetingAudioStatus === "connected"} />
           <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0 }}>
             {chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === "ai" && (
