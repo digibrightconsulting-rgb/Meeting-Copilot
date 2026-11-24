@@ -1253,14 +1253,22 @@ function MeetingAudioButton({ status, isListening, onConnect, onDisconnect }) {
 }
 
 function LiveTranscript({ entries, scrollRef, isListening, meetingAudioOn }) {
-  const [open, setOpen] = useState(true);
+  // Hidden by default: the transcript keeps running in the background and feeds
+  // the suggestions; users can open it to check what Unmute is hearing.
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem("unmute_transcript_open") === "true"; } catch { return false; } });
+  const toggle = () => setOpen(o => { const next = !o; try { localStorage.setItem("unmute_transcript_open", String(next)); } catch { /* storage blocked */ } return next; });
+  useEffect(() => { if (open && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [open, scrollRef]);
   const recent = entries.slice(-40);
   return (
     <div style={{ background: "white", borderTop: "1px solid #DDD6FE", flexShrink: 0 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "#FAFAFF", border: "none", borderBottom: open ? "1px solid #EDE9FE" : "none", padding: "7px 22px", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+      <button onClick={toggle} title={open ? "Hide the transcript (it keeps running)" : "Show what Unmute is hearing"} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "#FAFAFF", border: "none", borderBottom: open ? "1px solid #EDE9FE" : "none", padding: open ? "7px 22px" : "5px 22px", cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
         <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Live transcript</span>
-        <span style={{ fontSize: 11, color: "#9B8FC0" }}>{meetingAudioOn ? "You + the meeting" : "Your microphone only"}</span>
-        <span style={{ marginLeft: "auto", fontSize: 10, color: "#A78BFA" }}>{open ? "Hide ▾" : "Show ▸"}</span>
+        {isListening && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#16a34a", animation: "pulse 2s infinite", flexShrink: 0 }} />}
+        <span style={{ fontSize: 11, color: "#9B8FC0" }}>
+          {meetingAudioOn ? "You + the meeting" : "Your microphone only"}
+          {!open && (isListening ? ` · running in the background${entries.length ? ` · ${entries.length} line${entries.length === 1 ? "" : "s"}` : ""}` : entries.length ? ` · ${entries.length} lines` : "")}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "#A78BFA" }}>{open ? "Hide ▾" : "Show ▴"}</span>
       </button>
       {open && (
         <div ref={scrollRef} style={{ maxHeight: 120, overflowY: "auto", padding: "8px 22px 10px", fontSize: 12.5, lineHeight: 1.55 }}>
