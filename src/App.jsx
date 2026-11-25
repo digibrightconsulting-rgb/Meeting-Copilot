@@ -148,6 +148,12 @@ async function signUpWithEmail(name, email, password) {
   return { signedIn: false };
 }
 
+// Sends the sign-up confirmation email again (Supabase /resend)
+async function resendConfirmation(email) {
+  const { ok, data } = await supabaseAuthPost(`/resend?redirect_to=${encodeURIComponent(authRedirect())}`, { type: "signup", email });
+  if (!ok) throw new Error(friendlyAuthError(data, "Couldn't resend the email. Please try again in a minute."));
+}
+
 async function signInWithEmail(email, password) {
   const { ok, data } = await supabaseAuthPost("/token?grant_type=password", { email, password });
   if (!ok || !data.access_token) throw new Error(friendlyAuthError(data, "Could not sign you in. Please try again."));
@@ -1075,8 +1081,26 @@ function AuthScreen({ initialError = "" }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(initialError);
+  const [notice, setNotice] = useState("");
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [resendWait, setResendWait] = useState(0);
 
-  const switchTo = (m) => { setMode(m); setError(""); setPassword(""); };
+  useEffect(() => {
+    if (resendWait <= 0) return;
+    const t = setTimeout(() => setResendWait(w => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendWait]);
+
+  const switchTo = (m) => { setMode(m); setError(""); setNotice(""); setNeedsConfirm(false); setPassword(""); };
+
+  const resend = async () => {
+    setError(""); setNotice("");
+    try {
+      await resendConfirmation(email.trim().toLowerCase());
+      setNotice("Sent again. It can take a couple of minutes, and check your spam or junk folder.");
+      setResendWait(60);
+    } catch (err) { setError(err.message); }
+  };
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const submit = async (e) => {
@@ -1102,9 +1126,20 @@ function AuthScreen({ initialError = "" }) {
       }
     } catch (err) {
       setError(err.message);
+      if (mode === "signin" && /confirm your email/i.test(err.message)) setNeedsConfirm(true);
     }
     setBusy(false);
   };
+
+  const resendBlock = (
+    <div style={{ marginTop: 4 }}>
+      <AuthMessage kind="ok">{notice}</AuthMessage>
+      <button type="button" onClick={resend} disabled={resendWait > 0}
+        style={{ ...authLink, opacity: resendWait > 0 ? 0.5 : 1, cursor: resendWait > 0 ? "not-allowed" : "pointer" }}>
+        {resendWait > 0 ? `Resend available in ${resendWait}s` : "Resend confirmation email"}
+      </button>
+    </div>
+  );
 
   if (mode === "checkEmail" || mode === "resetSent") {
     return (
@@ -1116,7 +1151,9 @@ function AuthScreen({ initialError = "" }) {
             ? <>We've sent a confirmation link to <strong style={{ color: "#3B0764" }}>{email.trim()}</strong>. Click it to activate your account and you'll be taken straight into Unmute.</>
             : <>If there's an account for <strong style={{ color: "#3B0764" }}>{email.trim()}</strong>, we've sent a link to reset your password.</>}
         </p>
-        <p style={{ color: "#9B8FC0", fontSize: 12, margin: "0 0 18px" }}>Can't see it? Check your spam folder.</p>
+        <p style={{ color: "#9B8FC0", fontSize: 12, margin: "0 0 14px" }}>Can't see it after a few minutes? Check your spam or junk folder. Work email systems sometimes hold messages from new senders.</p>
+        <AuthMessage kind="error">{error}</AuthMessage>
+        {mode === "checkEmail" && <div style={{ marginBottom: 16 }}>{resendBlock}</div>}
         <button style={authLink} onClick={() => switchTo("signin")}>Back to sign in</button>
       </AuthShell>
     );
@@ -1134,6 +1171,7 @@ function AuthScreen({ initialError = "" }) {
       <h2 style={{ fontSize: 18, color: "#3B0764", margin: "0 0 6px" }}>{titles[mode][0]}</h2>
       <p style={{ color: "#6b7280", fontSize: 13, lineHeight: 1.6, margin: "0 0 22px" }}>{titles[mode][1]}</p>
       <AuthMessage kind="error">{error}</AuthMessage>
+      {mode === "signin" && needsConfirm && <div style={{ margin: "-4px 0 14px" }}>{resendBlock}</div>}
       <form onSubmit={submit} noValidate style={{ textAlign: "left" }}>
         {mode === "signup" && (
           <div style={{ marginBottom: 14 }}>
