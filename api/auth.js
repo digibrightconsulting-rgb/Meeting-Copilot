@@ -25,13 +25,23 @@ export default async function handler(req, res) {
   try {
     if (action === "upsert_profile") {
       const { profile } = data;
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+      if (!profile || typeof profile !== "object") return res.status(400).json({ error: "Missing profile" });
+      const specialties = (Array.isArray(profile.specialties) ? profile.specialties : []).slice(0, 10).map(s => ({
+        id: String(s.id || "").slice(0, 40),
+        name: String(s.name || "").slice(0, 80),
+        icon: String(s.icon || "").slice(0, 8),
+        expertise: (Array.isArray(s.expertise) ? s.expertise : []).slice(0, 30).map(x => String(x).slice(0, 80)),
+        platforms: (Array.isArray(s.platforms) ? s.platforms : []).slice(0, 20).map(x => String(x).slice(0, 60)),
+        context: String(s.context || "").slice(0, 1500),
+        audience: String(s.audience || "").slice(0, 300),
+      })).filter(s => s.id && s.name);
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?on_conflict=id`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "apikey": SUPABASE_SERVICE_KEY,
           "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
-          "Prefer": "resolution=merge-duplicates",
+          "Prefer": "resolution=merge-duplicates,return=minimal",
         },
         body: JSON.stringify({
           id: userId,
@@ -47,11 +57,16 @@ export default async function handler(req, res) {
           communication_style: profile.communicationStyle,
           meeting_type: profile.meetingType,
           language: profile.language,
+          specialties,
           updated_at: new Date().toISOString(),
         }),
       });
-      const result = await response.json();
-      return res.status(200).json({ success: true, data: result });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        console.error("Profile save failed:", response.status, detail);
+        return res.status(502).json({ error: "Couldn't save your profile." });
+      }
+      return res.status(200).json({ success: true });
     }
 
     if (action === "get_profile") {
@@ -61,6 +76,10 @@ export default async function handler(req, res) {
           "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}`,
         },
       });
+      if (!response.ok) {
+        console.error("Profile load failed:", response.status, await response.text().catch(() => ""));
+        return res.status(502).json({ error: "Couldn't load your profile." });
+      }
       const result = await response.json();
       return res.status(200).json({ success: true, data: result[0] || null });
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { meetingAudioSupported, micTranscriptionSupported, getMicStream, pickMeetingAudio, stopStream, streamIsLive, MeetingTranscriber, formatTranscript } from "./meetingAudio.js";
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -252,13 +252,36 @@ function handleAuthCallback() {
   return {};
 }
 
+// Saves the profile to the user's account (Supabase). Returns true on success.
 async function saveProfile(userId, profile) {
   try {
-    await authedFetch("/api/auth", {
+    const { activeSpecialty: _drop, ...clean } = profile; // never store derived fields
+    const res = await authedFetch("/api/auth", {
       method: "POST",
-      body: JSON.stringify({ action: "upsert_profile", userId, profile }),
+      body: JSON.stringify({ action: "upsert_profile", profile: clean }),
     });
-  } catch(e) { console.error("Save profile error:", e); }
+    if (!res.ok) { console.error("Save profile failed:", res.status); return false; }
+    return true;
+  } catch (e) { console.error("Save profile error:", e); return false; }
+}
+
+// Loads the profile saved in the user's account, or null if there isn't one.
+async function loadServerProfile() {
+  try {
+    const res = await authedFetch("/api/auth", { method: "POST", body: JSON.stringify({ action: "get_profile" }) });
+    if (!res.ok) return undefined; // unknown (network/server problem)
+    const { data } = await res.json();
+    if (!data) return null;
+    return {
+      ...DEFAULT_PROFILE,
+      name: data.name || "", role: data.role || "", roleId: data.role_id || "", company: data.company || "",
+      platforms: data.platforms || [], expertise: data.expertise || [],
+      jobContext: data.job_context || "", meetingObjective: data.meeting_objective || "", typicalAudience: data.typical_audience || "",
+      communicationStyle: data.communication_style || "", meetingType: data.meeting_type || DEFAULT_PROFILE.meetingType,
+      language: data.language?.code ? data.language : LANGUAGES[0],
+      specialties: Array.isArray(data.specialties) ? data.specialties : [],
+    };
+  } catch { return undefined; }
 }
 
 // How often live suggestions are requested (see triggerDebounced in MeetingApp)
@@ -340,12 +363,35 @@ const DEFAULT_PROFILE = {
   company: "", jobContext: "", meetingObjective: "", typicalAudience: "",
   communicationStyle: "",
   meetingType: "Campaign performance review", language: LANGUAGES[0],
+  specialties: [], // specialist sub-profiles, e.g. "Tracking & Measurement"
 };
+
+// The profile used for a meeting: main profile, optionally focused through one
+// of the user's specialist profiles (its expertise and context lead; the main
+// profile stays as broader background).
+function effectiveProfile(base, specialtyId) {
+  const spec = (base.specialties || []).find(sp => sp.id === specialtyId);
+  if (!spec) return { ...base, activeSpecialty: null };
+  const lines = [
+    spec.context ? `In this meeting they are wearing their "${spec.name}" specialist hat: ${spec.context}` : `In this meeting they are wearing their "${spec.name}" specialist hat.`,
+    base.jobContext ? `Broader role: ${base.jobContext}` : "",
+    spec.expertise?.length && base.expertise?.length ? `Broader expertise: ${base.expertise.join(", ")}` : "",
+  ].filter(Boolean);
+  return {
+    ...base,
+    expertise: spec.expertise?.length ? spec.expertise : base.expertise,
+    platforms: spec.platforms?.length ? [...new Set([...spec.platforms, ...base.platforms])] : base.platforms,
+    jobContext: lines.join("\n"),
+    typicalAudience: spec.audience || base.typicalAudience,
+    activeSpecialty: spec,
+  };
+}
 
 // ── PROMPTS ────────────────────────────────────────────────────────────────
 function profileBackground(profile) {
   return [
     `Role: ${profile.role}${profile.company ? " at " + profile.company : ""}`,
+    profile.activeSpecialty ? `Specialist focus for this meeting: ${profile.activeSpecialty.name}` : "",
     profile.expertise?.length ? `Expertise: ${profile.expertise.join(", ")}` : "",
     profile.platforms?.length ? `Platforms they know deeply: ${profile.platforms.join(", ")}` : "",
     profile.jobContext ? `Their work: ${profile.jobContext}` : "",
@@ -590,7 +636,7 @@ function Field({ label, value, onChange, placeholder, multiline, rows = 3 }) {
 }
 
 // Isolated skill input so typing doesn't re-render the whole onboarding tree
-function SkillAdder({ onAdd }) {
+function SkillAdder({ onAdd, placeholder = "Add your own skill…" }) {
   const [val, setVal] = useState("");
   const add = () => { const t = val.trim(); if (!t) return; onAdd(t); setVal(""); };
   return (
@@ -599,7 +645,7 @@ function SkillAdder({ onAdd }) {
         value={val}
         onChange={e => setVal(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-        placeholder="Add your own skill…"
+        placeholder={placeholder}
         style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "9px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }}
       />
       <button onClick={add} style={{ background: "#6D28D9", color: "white", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Add</button>
@@ -759,12 +805,251 @@ function AccountMenu({ name, role, onGuide, onEditProfile, onSignOut }) {
   );
 }
 
+// ── PROFILE EDITING & SPECIALIST PROFILES ─────────────────────────────────
+const ALL_SKILLS = [...new Set(MARKETING_ROLES.flatMap(r => r.skills))].sort();
+const SPECIALTY_ICONS = ["🎯", "📊", "🔬", "🖥️", "📡", "🧭", "🎨", "💡", "🛠️", "📈"];
+const SPECIALTY_STARTERS = [
+  { name: "Tracking & Measurement", icon: "🔬", expertise: ["Multi-touch attribution", "Incrementality testing", "Marketing ROI & attribution"] },
+  { name: "Programmatic Buying", icon: "🖥️", expertise: ["Programmatic advertising", "Bid strategy & optimisation", "Campaign performance analysis"] },
+  { name: "Brand & Creative", icon: "🎨", expertise: ["Brand strategy"] },
+  { name: "Growth & Experimentation", icon: "📈", expertise: ["A/B testing & experimentation", "Funnel analysis", "CAC & LTV optimisation"] },
+].map(st => ({ ...st, expertise: st.expertise.filter(x => ALL_SKILLS.includes(x)) }));
+
+const fieldLabel = { display: "block", fontSize: 11, fontWeight: 700, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", margin: "0 0 7px" };
+const textInput = { width: "100%", boxSizing: "border-box", background: "white", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px", fontSize: 14, color: "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none" };
+const chip = (on) => ({ background: on ? "#EDE9FE" : "#FAFAFA", color: on ? "#5B21B6" : "#374151", border: `1.5px solid ${on ? "#8B5CF6" : "#E5E7EB"}`, borderRadius: 20, padding: "6px 12px", fontSize: 12.5, fontWeight: on ? 600 : 500, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" });
+const toggleIn = (list, v) => list.includes(v) ? list.filter(x => x !== v) : [...list, v];
+
+// Long option lists start collapsed to just the selected items, with a
+// "Browse all" toggle, so the editor stays scannable.
+function ChipPicker({ options, selected, onChange, addPlaceholder }) {
+  const long = options.length > 20;
+  const [expanded, setExpanded] = useState(!long || selected.length === 0);
+  const all = [...new Set([...options, ...selected])];
+  const shown = expanded ? all : selected;
+  return (
+    <>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 10 }}>
+        {shown.map(o => <button type="button" key={o} onClick={() => onChange(toggleIn(selected, o))} style={chip(selected.includes(o))}>{selected.includes(o) ? "✓ " : ""}{o}</button>)}
+        {long && (
+          <button type="button" onClick={() => setExpanded(e => !e)} style={{ background: "none", border: "1.5px dashed #C4B5FD", color: "#6D28D9", borderRadius: 20, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+            {expanded ? "Show selected only" : `＋ Browse all ${options.length} skills`}
+          </button>
+        )}
+      </div>
+      {addPlaceholder && <SkillAdder placeholder={addPlaceholder} onAdd={(v) => { if (!selected.includes(v)) onChange([...selected, v]); }} />}
+    </>
+  );
+}
+
+function SpecialtyForm({ initial, onSave, onCancel }) {
+  const [sp, setSp] = useState(initial);
+  const set = (k, v) => setSp(x => ({ ...x, [k]: v }));
+  const valid = sp.name.trim() && (sp.expertise.length || sp.context.trim());
+  return (
+    <div style={{ background: "#FAFAFF", border: "1.5px solid #C4B5FD", borderRadius: 14, padding: 18, marginBottom: 12, textAlign: "left" }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div>
+          <label style={fieldLabel}>Icon</label>
+          <select value={sp.icon} onChange={e => set("icon", e.target.value)} style={{ ...textInput, width: 64, padding: "9px 6px", fontSize: 18 }}>
+            {SPECIALTY_ICONS.map(i => <option key={i} value={i}>{i}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={fieldLabel}>Specialist profile name *</label>
+          <input value={sp.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Tracking & Measurement" style={textInput} autoFocus />
+        </div>
+      </div>
+      <label style={fieldLabel}>Expertise for this hat</label>
+      <ChipPicker options={ALL_SKILLS} selected={sp.expertise} onChange={v => set("expertise", v)} addPlaceholder="Add a skill, e.g. Pixel & tag implementation" />
+      <div style={{ height: 14 }} />
+      <label style={fieldLabel}>Platforms & tools for this hat</label>
+      <ChipPicker options={PLATFORMS.map(p => p.label)} selected={sp.platforms} onChange={v => set("platforms", v)} addPlaceholder="Add a tool, e.g. AppsFlyer, GA4, GTM" />
+      <div style={{ height: 14 }} />
+      <label style={fieldLabel}>What you bring to these meetings</label>
+      <textarea value={sp.context} onChange={e => set("context", e.target.value)} rows={3} placeholder="e.g. I own tracking and measurement: MMP setup, pixels and server-side events, attribution windows and incrementality testing. I'm usually the person explaining why numbers don't match." style={{ ...textInput, resize: "vertical" }} />
+      <div style={{ height: 12 }} />
+      <label style={fieldLabel}>Who's usually in these meetings? (optional)</label>
+      <input value={sp.audience} onChange={e => set("audience", e.target.value)} placeholder="e.g. Analytics, product, BI, the MMP account team" style={textInput} />
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+        <button type="button" onClick={onCancel} style={{ background: "white", border: "1px solid #DDD6FE", color: "#6b7280", borderRadius: 10, padding: "9px 16px", fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Cancel</button>
+        <button type="button" disabled={!valid} onClick={() => onSave({ ...sp, name: sp.name.trim() })} style={{ background: valid ? "#6D28D9" : "#C4B5FD", border: "none", color: "white", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: valid ? "pointer" : "not-allowed", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Save specialist profile</button>
+      </div>
+    </div>
+  );
+}
+
+function SpecialtiesManager({ specialties, onChange, mainProfile }) {
+  const [editing, setEditing] = useState(null); // specialty object being edited / created
+  const blank = (starter = {}) => ({ id: `sp_${Date.now().toString(36)}`, name: "", icon: "🎯", expertise: [], platforms: [], context: "", audience: "", ...starter });
+  const save = (sp) => {
+    onChange(specialties.some(x => x.id === sp.id) ? specialties.map(x => x.id === sp.id ? sp : x) : [...specialties, sp]);
+    setEditing(null);
+  };
+  return (
+    <div style={{ textAlign: "left" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 12, padding: "11px 14px", marginBottom: 10 }}>
+        <span style={{ fontSize: 18 }}>⭐</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13.5, color: "#3B0764" }}>Main profile{mainProfile?.role ? ` · ${mainProfile.role}` : ""}</div>
+          <div style={{ fontSize: 12, color: "#7C6BA8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mainProfile?.expertise?.length ? mainProfile.expertise.slice(0, 4).join(" · ") + (mainProfile.expertise.length > 4 ? " …" : "") : "Your general expertise"}</div>
+        </div>
+        <span style={{ fontSize: 11, color: "#9B8FC0" }}>default</span>
+      </div>
+      {specialties.map(sp => editing?.id === sp.id ? (
+        <SpecialtyForm key={sp.id} initial={editing} onSave={save} onCancel={() => setEditing(null)} />
+      ) : (
+        <div key={sp.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "white", border: "1px solid #E9E5FB", borderRadius: 12, padding: "11px 14px", marginBottom: 10 }}>
+          <span style={{ fontSize: 18 }}>{sp.icon || "🎯"}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, color: "#1E1033" }}>{sp.name}</div>
+            <div style={{ fontSize: 12, color: "#7C6BA8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[...sp.expertise, ...sp.platforms].slice(0, 5).join(" · ") || sp.context}</div>
+          </div>
+          <button type="button" onClick={() => setEditing(sp)} style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", color: "#6D28D9", borderRadius: 8, padding: "5px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Edit</button>
+          <button type="button" onClick={() => { if (window.confirm(`Delete the "${sp.name}" specialist profile?`)) onChange(specialties.filter(x => x.id !== sp.id)); }} aria-label={`Delete ${sp.name}`} style={{ background: "white", border: "1px solid #FECACA", color: "#B91C1C", borderRadius: 8, padding: "5px 9px", fontSize: 12, cursor: "pointer" }}>✕</button>
+        </div>
+      ))}
+      {editing && !specialties.some(x => x.id === editing.id) && <SpecialtyForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {!editing && (
+        <>
+          <button type="button" onClick={() => setEditing(blank())} style={{ width: "100%", background: "white", border: "1.5px dashed #A78BFA", color: "#6D28D9", borderRadius: 12, padding: "12px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>＋ Add a specialist profile</button>
+          {specialties.length === 0 && (
+            <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#9B8FC0" }}>Start from:</span>
+              {SPECIALTY_STARTERS.map(st => <button type="button" key={st.name} onClick={() => setEditing(blank(st))} style={chip(false)}>{st.icon} {st.name}</button>)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Picks which profile (main or a specialist one) to use for a meeting
+function ProfilePicker({ profile, value, onChange, compact }) {
+  const specs = profile.specialties || [];
+  if (specs.length === 0) return null;
+  if (compact) {
+    return (
+      <select value={value || ""} onChange={e => onChange(e.target.value || null)} title="Which of your profiles to use for this meeting"
+        style={{ background: "white", border: "1px solid #C4B5FD", color: "#5B21B6", borderRadius: 7, padding: "5px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0, maxWidth: 220, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+        <option value="">⭐ Main profile</option>
+        {specs.map(sp => <option key={sp.id} value={sp.id}>{sp.icon} {sp.name}</option>)}
+      </select>
+    );
+  }
+  return (
+    <div style={{ marginBottom: 18, textAlign: "left" }}>
+      <label style={{ ...fieldLabel, textAlign: "center" }}>Profile for this meeting</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, justifyContent: "center" }}>
+        <button type="button" onClick={() => onChange(null)} style={chip(!value)}>⭐ Main profile</button>
+        {specs.map(sp => <button type="button" key={sp.id} onClick={() => onChange(sp.id)} style={chip(value === sp.id)}>{sp.icon} {sp.name}</button>)}
+      </div>
+    </div>
+  );
+}
+
+function ProfileEditor({ profile: initial, onSave, onCancel, onRedoOnboarding }) {
+  const [p, setP] = useState({ ...DEFAULT_PROFILE, ...initial, specialties: initial.specialties || [] });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+  const set = (k, v) => setP(x => ({ ...x, [k]: v }));
+  const valid = p.name.trim() && p.role.trim();
+  const save = async () => {
+    setSaving(true); setMessage(null);
+    const synced = await onSave(p);
+    setSaving(false);
+    if (!synced) setMessage({ kind: "warn", text: "Saved on this device, but we couldn't sync it to your account. It'll retry next time you save." });
+  };
+  const Section = ({ title, sub, children }) => (
+    <section style={{ background: "white", border: "1px solid #E9E5FB", borderRadius: 16, padding: "20px 22px", marginBottom: 16 }}>
+      <h3 style={{ margin: "0 0 4px", fontSize: 16, color: "#3B0764", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{title}</h3>
+      {sub && <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "#7C6BA8", lineHeight: 1.55 }}>{sub}</p>}
+      {children}
+    </section>
+  );
+  return (
+    <div style={{ minHeight: "100vh", background: "#F5F3FF", fontFamily: "'Plus Jakarta Sans', sans-serif", textAlign: "left" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'); *{box-sizing:border-box}`}</style>
+      <div style={{ background: "#3B0764", padding: "12px 22px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 10 }}>
+        <button onClick={onCancel} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "white", borderRadius: 8, width: 34, height: 34, cursor: "pointer", fontSize: 16 }} aria-label="Back">‹</button>
+        <span style={{ color: "white", fontWeight: 700, fontSize: 16, fontFamily: "'Fraunces', Georgia, serif" }}>Edit profile</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button onClick={onCancel} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.25)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+          <button onClick={save} disabled={!valid || saving} style={{ background: valid ? "#8B5CF6" : "#6B5B95", border: "none", color: "white", borderRadius: 8, padding: "7px 18px", fontSize: 13, fontWeight: 700, cursor: valid ? "pointer" : "not-allowed" }}>{saving ? "Saving…" : "Save changes"}</button>
+        </div>
+      </div>
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 20px 60px" }}>
+        {message && <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 16 }}>{message.text}</div>}
+
+        {Section({ title: "About you", children: (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div><label style={fieldLabel}>Name *</label><input value={p.name} onChange={e => set("name", e.target.value)} style={textInput} /></div>
+            <div><label style={fieldLabel}>Job title *</label><input value={p.role} onChange={e => set("role", e.target.value)} style={textInput} /></div>
+            <div><label style={fieldLabel}>Company</label><input value={p.company || ""} onChange={e => set("company", e.target.value)} style={textInput} /></div>
+            <div><label style={fieldLabel}>Role type</label>
+              <select value={p.roleId || ""} onChange={e => set("roleId", e.target.value)} style={textInput}>
+                <option value="">Choose…</option>
+                {MARKETING_ROLES.map(r => <option key={r.id} value={r.id}>{r.icon} {r.label}</option>)}
+              </select>
+            </div>
+          </div>
+        ) })}
+
+        {Section({ title: "Main expertise", sub: "Your general areas of expertise. Used whenever you're on your main profile.", children: (
+          <ChipPicker options={ALL_SKILLS} selected={p.expertise} onChange={v => set("expertise", v)} addPlaceholder="Add your own skill…" />
+        ) })}
+
+        {Section({ title: "Specialist profiles", sub: "Wear different hats? Add a specialist profile for each speciality, e.g. Tracking & Measurement. Pick it when you prep a meeting and suggestions will lean on that expertise.", children: (
+          <SpecialtiesManager specialties={p.specialties} onChange={v => set("specialties", v)} mainProfile={p} />
+        ) })}
+
+        {Section({ title: "Platforms", children: (
+          <ChipPicker options={PLATFORMS.map(x => x.label)} selected={p.platforms} onChange={v => set("platforms", v)} addPlaceholder="Add a platform or tool…" />
+        ) })}
+
+        {Section({ title: "Your work", children: (
+          <>
+            <label style={fieldLabel}>What do you do day to day?</label>
+            <textarea value={p.jobContext || ""} onChange={e => set("jobContext", e.target.value)} rows={3} style={{ ...textInput, resize: "vertical", marginBottom: 14 }} />
+            <label style={fieldLabel}>What are you typically trying to achieve in meetings?</label>
+            <textarea value={p.meetingObjective || ""} onChange={e => set("meetingObjective", e.target.value)} rows={2} style={{ ...textInput, resize: "vertical", marginBottom: 14 }} />
+            <label style={fieldLabel}>Who do you typically meet with?</label>
+            <input value={p.typicalAudience || ""} onChange={e => set("typicalAudience", e.target.value)} style={textInput} />
+          </>
+        ) })}
+
+        {Section({ title: "Style & defaults", children: (
+          <>
+            <label style={fieldLabel}>How do you want to come across?</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 16 }}>
+              {COMMUNICATION_STYLES.map(st => <button type="button" key={st.id} title={st.desc} onClick={() => set("communicationStyle", st.id)} style={chip(p.communicationStyle === st.id)}>{st.icon} {st.label}</button>)}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div><label style={fieldLabel}>Most common meeting type</label>
+                <select value={p.meetingType} onChange={e => set("meetingType", e.target.value)} style={textInput}>{MEETING_TYPES.map(t => <option key={t}>{t}</option>)}</select>
+              </div>
+              <div><label style={fieldLabel}>Meeting language</label>
+                <select value={p.language?.code} onChange={e => set("language", LANGUAGES.find(l => l.code === e.target.value))} style={textInput}>{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}</select>
+              </div>
+            </div>
+          </>
+        ) })}
+
+        <p style={{ textAlign: "center", fontSize: 12, color: "#9B8FC0" }}>
+          Prefer the guided setup? <button onClick={onRedoOnboarding} style={{ background: "none", border: "none", color: "#6D28D9", textDecoration: "underline", cursor: "pointer", fontSize: 12 }}>Redo onboarding</button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── ONBOARDING ─────────────────────────────────────────────────────────────
 function Onboarding({ onComplete, initialName = "" }) {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, name: initialName });
   const [consentGiven, setConsentGiven] = useState(false);
-  const totalSteps = 10;
+  const totalSteps = 11;
 
   const update = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
@@ -780,19 +1065,12 @@ function Onboarding({ onComplete, initialName = "" }) {
     return true;
   };
 
-  const finish = () => {
-    try {
-      const profileStr = JSON.stringify(profile);
-      localStorage.setItem("unmute_mkt_profile", profileStr);
-      localStorage.setItem("unmute_mkt_onboarded", "true");
-    } catch(e) {
-      console.error("Storage error:", e);
-    }
-    window.location.href = window.location.href;
-  };
+  // Saves locally AND to the user's account (previously this only saved to the
+  // browser, so profiles never reached Supabase).
+  const finish = () => onComplete(profile);
 
   const Progress = () => {
-    const phase = step <= 3 ? "Setting up your profile…" : step <= 6 ? "Personalising your suggestions…" : step === 8 ? "Using Unmute in your calls…" : "Almost ready…";
+    const phase = step <= 3 ? "Setting up your profile…" : step <= 7 ? "Personalising your suggestions…" : step === 9 ? "Using Unmute in your calls…" : "Almost ready…";
     return (
       <div style={{ marginBottom: 28 }}>
         <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
@@ -925,8 +1203,19 @@ function Onboarding({ onComplete, initialName = "" }) {
           </Card>
         )}
 
-        {/* Step 5 — Company & Work Context */}
+        {/* Step 5 — Specialist profiles (optional) */}
         {step === 5 && (
+          <Card>
+            <Progress />
+            <H2>Do you wear different hats?</H2>
+            <Sub>If your expertise spans different specialities, create a specialist profile for each. For example, a programmatic buyer who also leads tracking and measurement meetings. You'll pick the right one when you prep a meeting, and suggestions will lean on that expertise. Optional, and you can add them later from Edit profile.</Sub>
+            <SpecialtiesManager specialties={profile.specialties || []} onChange={list => update("specialties", list)} mainProfile={profile} />
+            <NavButtons nextLabel={(profile.specialties || []).length ? "Continue →" : "Skip for now →"} disabled={false} />
+          </Card>
+        )}
+
+        {/* Step 5 — Company & Work Context */}
+        {step === 6 && (
           <Card>
             <Progress />
             <H2>Tell us about your work</H2>
@@ -954,7 +1243,7 @@ function Onboarding({ onComplete, initialName = "" }) {
         )}
 
         {/* Step 6 — Meeting Type */}
-        {step === 6 && (
+        {step === 7 && (
           <Card>
             <Progress />
             <H2>What type of calls do you attend most?</H2>
@@ -971,7 +1260,7 @@ function Onboarding({ onComplete, initialName = "" }) {
         )}
 
         {/* Step 7 — Language */}
-        {step === 7 && (
+        {step === 8 && (
           <Card>
             <Progress />
             <H2>What language are your meetings in?</H2>
@@ -988,7 +1277,7 @@ function Onboarding({ onComplete, initialName = "" }) {
         )}
 
         {/* Step 8 — Using Unmute with Meet / Zoom / Teams */}
-        {step === 8 && (
+        {step === 9 && (
           <Card>
             <Progress />
             <H2>Using Unmute in your calls</H2>
@@ -999,7 +1288,7 @@ function Onboarding({ onComplete, initialName = "" }) {
         )}
 
         {/* Step 9 — Tutorial + Consent */}
-        {step === 9 && (
+        {step === 10 && (
           <Card>
             <Progress />
             <h2 style={{ margin: "0 0 6px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>How it works</h2>
@@ -1466,6 +1755,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState("");
   const [recovering, setRecovering] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -1478,11 +1768,21 @@ export default function App() {
       const session = await getSession();
       if (session) {
         setUser(session.user);
-        // Load profile from localStorage first for speed
-        const saved = localStorage.getItem("unmute_mkt_profile");
-        const done = localStorage.getItem("unmute_mkt_onboarded");
-        if (done && saved) {
-          try { setProfile(JSON.parse(saved)); setOnboarded(true); } catch {}
+        // The account (Supabase) is the source of truth so the profile follows
+        // the user across devices; this browser's copy is the fallback.
+        let local = null;
+        try {
+          const saved = localStorage.getItem("unmute_mkt_profile");
+          if (localStorage.getItem("unmute_mkt_onboarded") && saved) local = { ...DEFAULT_PROFILE, ...JSON.parse(saved) };
+        } catch { /* corrupt local copy */ }
+        const server = await loadServerProfile();
+        if (server) {
+          setProfile(server); setOnboarded(true);
+          localStorage.setItem("unmute_mkt_profile", JSON.stringify(server));
+          localStorage.setItem("unmute_mkt_onboarded", "true");
+        } else if (local) {
+          setProfile(local); setOnboarded(true);
+          if (server === null) saveProfile(session.user.id, local); // first time: copy this browser's profile to the account
         }
       }
       setReady(true);
@@ -1497,6 +1797,16 @@ export default function App() {
     window.location.reload();
   };
 
+  // Edit profile: saves locally straight away, then to the account. Returns
+  // whether the account copy was updated.
+  const handleProfileSave = async (p) => {
+    localStorage.setItem("unmute_mkt_profile", JSON.stringify(p));
+    setProfile(p);
+    const synced = user ? await saveProfile(user.id, p) : false;
+    if (synced) setEditingProfile(false);
+    return synced;
+  };
+
   if (!ready) return (
     <div style={{ height: "100vh", background: "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
@@ -1509,11 +1819,25 @@ export default function App() {
   if (!user) return <AuthScreen initialError={authError} />;
   if (recovering) return <SetNewPasswordScreen onDone={() => setRecovering(false)} />;
   if (!onboarded) return <Onboarding onComplete={handleOnboardingComplete} initialName={user.user_metadata?.name || ""} />;
-  return <MeetingApp profile={profile} user={user} onEditProfile={() => { localStorage.removeItem("unmute_mkt_onboarded"); window.location.reload(); }} />;
+  if (editingProfile) return (
+    <ProfileEditor
+      profile={profile}
+      onSave={handleProfileSave}
+      onCancel={() => setEditingProfile(false)}
+      onRedoOnboarding={() => { if (window.confirm("Start the guided setup again? Your current profile stays until you finish.")) { localStorage.removeItem("unmute_mkt_onboarded"); setOnboarded(false); setEditingProfile(false); } }}
+    />
+  );
+  return <MeetingApp baseProfile={profile} user={user} onEditProfile={() => setEditingProfile(true)} />;
 }
 
 // ── MEETING APP ────────────────────────────────────────────────────────────
-function MeetingApp({ profile, user, onEditProfile }) {
+function MeetingApp({ baseProfile, user, onEditProfile }) {
+  // Which profile this meeting uses: main (null) or a specialist profile id
+  const [specialtyId, setSpecialtyIdState] = useState(() => {
+    try { const id = localStorage.getItem("unmute_active_specialty"); return (baseProfile.specialties || []).some(sp => sp.id === id) ? id : null; } catch { return null; }
+  });
+  const setSpecialtyId = (id) => { setSpecialtyIdState(id); try { id ? localStorage.setItem("unmute_active_specialty", id) : localStorage.removeItem("unmute_active_specialty"); } catch { /* storage blocked */ } };
+  const profile = useMemo(() => effectiveProfile(baseProfile, specialtyId), [baseProfile, specialtyId]);
   const [mode, setMode] = useState("hub");
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 820);
   const [viewWidth, setViewWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1440);
@@ -1636,13 +1960,13 @@ function MeetingApp({ profile, user, onEditProfile }) {
 
   const saveMeeting = () => {
     if (!prepTopic.trim()) return;
-    const m = { id: Date.now(), savedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), topic: prepTopic, attendees: prepAttendees, goal: prepGoal, concerns: prepConcerns, data: prepData };
+    const m = { id: Date.now(), savedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), topic: prepTopic, attendees: prepAttendees, goal: prepGoal, concerns: prepConcerns, data: prepData, specialtyId };
     const updated = [m, ...savedMeetings].slice(0, 10);
     setSavedMeetings(updated);
     localStorage.setItem("unmute_mkt_meetings", JSON.stringify(updated));
   };
 
-  const loadMeeting = (m) => { setPrepTopic(m.topic); setPrepAttendees(m.attendees); setPrepGoal(m.goal); setPrepConcerns(m.concerns); setPrepData(m.data); setShowPlanner(false); };
+  const loadMeeting = (m) => { if ((baseProfile.specialties || []).some(sp => sp.id === m.specialtyId)) setSpecialtyId(m.specialtyId); else setSpecialtyId(null); setPrepTopic(m.topic); setPrepAttendees(m.attendees); setPrepGoal(m.goal); setPrepConcerns(m.concerns); setPrepData(m.data); setShowPlanner(false); };
   const deleteMeeting = (id) => { const u = savedMeetings.filter(m => m.id !== id); setSavedMeetings(u); localStorage.setItem("unmute_mkt_meetings", JSON.stringify(u)); };
 
   // ── Live board updates ──────────────────────────────────────────────────
@@ -2250,6 +2574,12 @@ function MeetingApp({ profile, user, onEditProfile }) {
               <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Meeting Brief Builder</h2>
               <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>Generate a personalised brief — includes an Industry Pulse with the latest marketing trends relevant to your meeting.</p>
             </div>
+            <ProfilePicker profile={baseProfile} value={specialtyId} onChange={setSpecialtyId} />
+            {(baseProfile.specialties || []).length === 0 && (
+              <p style={{ margin: "-6px 0 16px", fontSize: 11.5, color: "#9B8FC0" }}>
+                Wear different hats? <button onClick={onEditProfile} style={{ background: "none", border: "none", padding: 0, color: "#6D28D9", textDecoration: "underline", cursor: "pointer", fontSize: 11.5 }}>Add specialist profiles</button> to tailor briefs to the meeting.
+              </p>
+            )}
             <Field label="Meeting Topic *" value={prepTopic} onChange={setPrepTopic} placeholder="e.g. Q3 Paid Media Budget Review" />
             <Field label="Attendees & Their Roles" value={prepAttendees} onChange={setPrepAttendees} placeholder="e.g. CMO (Sarah), CFO (James), Head of Performance (Tom)" multiline rows={2} />
             <Field label="Your Goal" value={prepGoal} onChange={setPrepGoal} placeholder="e.g. Get sign-off on Meta budget increase for Q3" />
@@ -2281,6 +2611,7 @@ function MeetingApp({ profile, user, onEditProfile }) {
             <span style={{ fontSize: 11, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, whiteSpace: "nowrap" }}>Goal</span>
             <input value={sessionGoal} onChange={e => setSessionGoal(e.target.value)} placeholder="Set your goal for this meeting…" style={{ flex: 1, background: "white", border: "1px solid #DDD6FE", borderRadius: 8, color: "#1E1033", padding: "7px 12px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif" }} />
             {language.code !== "en-US" && <div style={{ background: "#EDE9FE", border: "1px solid #C4B5FD", borderRadius: 7, padding: "5px 12px", fontSize: 11, color: "#5B21B6", fontFamily: "monospace", whiteSpace: "nowrap", fontWeight: 600 }}>{language.flag} → 🇬🇧 auto-translate on</div>}
+            <ProfilePicker profile={baseProfile} value={specialtyId} onChange={setSpecialtyId} compact />
             <button onClick={() => setShowBrief(true)} title="Open your pre-meeting brief" style={{ background: "white", border: "1px solid #C4B5FD", color: "#5B21B6", borderRadius: 7, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
               📝 Brief{prepPoints.length ? "" : " (empty)"}
             </button>
