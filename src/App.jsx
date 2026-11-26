@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { whoBlock, activeFocus, keytermsFor, hasBrain, brainIsStale, brainSourceHash, buildRoleInferencePrompt, buildBrainPrompt, normaliseFocus, mergeUserEdits, trackConceptEdit } from "./brain.js";
+import { whoBlock, activeFocus, keytermsFor, hasBrain, brainIsStale, brainSourceHash, buildRoleInferencePrompt, buildBrainPrompt, brainProfileIds, normaliseFocus, mergeUserEdits, trackConceptEdit } from "./brain.js";
 import { meetingAudioSupported, micTranscriptionSupported, getMicStream, pickMeetingAudio, stopStream, streamIsLive, MeetingTranscriber, formatTranscript } from "./meetingAudio.js";
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -1128,20 +1128,33 @@ async function inferRole(profile) {
 // Builds the per-profile focus for main + every specialist profile and returns
 // the updated profile (expertise/jobContext are kept in sync for older code).
 async function buildBrain(profile) {
-  const raw = await callClaudeLong(buildBrainPrompt(profile));
-  const d = safeParse(raw);
-  if (!d?.profiles?.main) throw new Error("Couldn't build your profile. Please try again.");
   const prev = profile.brain?.profiles || {};
-  const profiles = { main: mergeUserEdits(normaliseFocus(d.profiles.main, "Main profile"), prev.main) };
-  for (const sp of profile.specialties || []) {
-    const f = mergeUserEdits(normaliseFocus(d.profiles[sp.id], sp.name), prev[sp.id]);
-    if (f) profiles[sp.id] = { ...f, name: sp.name };
-  }
+  const buildOne = async (id) => {
+    const name = id === "main" ? "Main profile" : (profile.specialties || []).find(sp => sp.id === id)?.name;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const f = normaliseFocus(safeParse(await callClaudeLong(buildBrainPrompt(profile, id))), name);
+        if (f?.focusConcepts?.length) return f;
+      } catch (e) { console.warn(`Brain build for ${id} failed (attempt ${attempt + 1}):`, e.message); }
+    }
+    return null;
+  };
+  const ids = brainProfileIds(profile);
+  const results = await Promise.all(ids.map(buildOne));
+  const profiles = {};
+  ids.forEach((id, i) => {
+    const fresh = results[i];
+    if (fresh) profiles[id] = { ...mergeUserEdits(fresh, prev[id]), name: id === "main" ? fresh.name : (profile.specialties || []).find(sp => sp.id === id)?.name || fresh.name };
+    else if (prev[id]) profiles[id] = prev[id]; // keep the last good version
+  });
+  if (!profiles.main) throw new Error("We couldn't build your profile just now. Please click ↻ Rebuild to try again.");
+  const failed = ids.filter((id, i) => !results[i]).length;
   const next = { ...profile, brain: { ...(profile.brain || {}), profiles, builtAt: new Date().toISOString() } };
   next.expertise = profiles.main.focusConcepts.slice(0, 10);
   next.specialties = (profile.specialties || []).map(sp => profiles[sp.id] ? { ...sp, expertise: profiles[sp.id].focusConcepts.slice(0, 10) } : sp);
   if (!next.jobContext && next.roleDescription) next.jobContext = next.roleDescription;
   next.brain.sourceHash = brainSourceHash(next);
+  if (failed) next.brain.partial = failed; else delete next.brain.partial;
   return next;
 }
 
@@ -1249,6 +1262,7 @@ function BrainReview({ profile, onChange, building, error, onRebuild }) {
         <button type="button" onClick={onRebuild} disabled={building} style={{ ...chip(false), marginLeft: "auto", borderStyle: "dashed", color: "#6D28D9", opacity: building ? 0.5 : 1 }}>↻ Rebuild</button>
       </div>
       {building && <Thinking text="Building your profile: working out what matters in your meetings…" />}
+      {!building && brain.partial > 0 && <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E", borderRadius: 10, padding: "9px 14px", fontSize: 13, marginBottom: 10 }}>One of your profiles didn't build this time. Click ↻ Rebuild to try again.</div>}
       {!building && error && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>{error}</div>}
       {!building && focus && (
         <div style={{ border: "1.5px solid #DDD6FE", borderRadius: 14, padding: 18 }}>

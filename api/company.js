@@ -33,7 +33,7 @@ Find: what the company does, its main products, where it operates, who its custo
 Rules: only state things you found or are confident about. Keep every field short. If you can't identify the company with confidence, set "confident" to false.
 
 Respond ONLY with JSON:
-{"confident": true, "name": "official name", "summary": "one sentence: what they do and for whom", "industry": "e.g. Fintech, online investing", "products": ["..."], "markets": ["countries/regions"], "customers": "who they sell to, one line", "regulation": "one line, or empty if none notable", "competitors": ["..."], "marketingContext": "one line on what shapes their marketing"}`;
+{"confident": true, "name": "official name", "summary": "one sentence: what they do and for whom", "industry": "e.g. Fintech, online investing", "products": ["..."], "markets": ["countries/regions"], "customers": "who they sell to, one line", "regulation": "one or two short sentences, or empty if none notable", "competitors": ["..."], "marketingContext": "one line on what shapes their marketing"}`;
 
   try {
     let messages = [{ role: "user", content: prompt }];
@@ -65,14 +65,14 @@ Respond ONLY with JSON:
       card: {
         confident: card.confident !== false,
         name: clip(card.name || company, 120),
-        summary: clip(card.summary, 300),
+        summary: clip(card.summary, 400),
         industry: clip(card.industry, 120),
         products: list(card.products, 8),
         markets: list(card.markets, 10, 60),
         customers: clip(card.customers, 200),
-        regulation: clip(card.regulation, 250),
+        regulation: clip(card.regulation, 500),
         competitors: list(card.competitors, 8, 60),
-        marketingContext: clip(card.marketingContext, 250),
+        marketingContext: clip(card.marketingContext, 400),
       },
     });
   } catch (error) {
