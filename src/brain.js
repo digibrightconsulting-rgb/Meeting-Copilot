@@ -63,15 +63,25 @@ Respond ONLY with JSON:
  "suggestedProfiles": [{"name": "e.g. Tracking & Measurement", "icon": "one emoji", "platforms": ["tools used for this"], "context": "one sentence: what they do in these meetings"}]}`;
 }
 
-// ── Step: build the brain for every profile (main + specialists) ──────────
-export function buildBrainPrompt(profile) {
+// ── Step: build the brain, one profile per request ────────────────────────
+// (Building all profiles in one reply overflowed the response length; one
+// request per profile, run in parallel, is faster and never truncates.)
+export function brainProfileIds(profile) {
+  return ["main", ...arr(profile.specialties).map(s => s.id)];
+}
+
+export function buildBrainPrompt(profile, targetId = "main") {
   const c = profile.brain?.company || {};
   const r = profile.brain?.role || {};
   const specs = arr(profile.specialties);
-  const profilesDesc = [
-    `- id "main": their main/general profile. Platforms: ${arr(profile.platforms).join(", ") || "-"}. What they do: ${profile.roleDescription || r.summary || "-"}`,
-    ...specs.map(s => `- id "${s.id}": "${s.name}" specialist profile. Tools: ${arr(s.platforms).join(", ") || "-"}. What they do in these meetings: ${s.context || "-"}${s.audience ? ". Usually meets with: " + s.audience : ""}`),
-  ].join("\n");
+  const target = targetId === "main" ? null : specs.find(s => s.id === targetId);
+  const others = [
+    targetId !== "main" ? `main profile (${arr(profile.platforms).slice(0, 6).join(", ")})` : "",
+    ...specs.filter(s => s.id !== targetId).map(s => `"${s.name}"`),
+  ].filter(Boolean);
+  const hat = target
+    ? `their "${target.name}" specialist profile. Tools: ${arr(target.platforms).join(", ") || "-"}. What they do in these meetings: ${target.context || "-"}${target.audience ? ". Usually meets with: " + target.audience : ""}`
+    : `their MAIN profile (their general role). Platforms: ${arr(profile.platforms).join(", ") || "-"}. What they do: ${profile.roleDescription || r.summary || "-"}`;
 
   return `You are building the knowledge an AI meeting assistant will use to help this person contribute expertly in meetings. Be specific to their company, role and tools, never generic.
 
@@ -79,7 +89,6 @@ COMPANY: ${c.name || profile.company || "-"}: ${c.summary || ""}
 ${line("Industry", c.industry)}
 ${line("Products", c.products)}
 ${line("Markets", c.markets)}
-${line("Customers", c.customers)}
 ${line("Regulation", c.regulation)}
 ${line("Competitors", c.competitors)}
 ${line("Marketing context", c.marketingContext)}
@@ -87,27 +96,26 @@ ${line("Marketing context", c.marketingContext)}
 PERSON: ${profile.name || ""}, ${profile.role || ""}
 ${line("Role summary", r.summary)}
 ${line("Responsibilities", r.responsibilities)}
-${line("Channels", r.channels)}
 ${line("KPIs", r.kpis)}
 ${line("Usually meets with", profile.typicalAudience)}
-${line("Types of meetings", arr(profile.meetingTypes).length ? profile.meetingTypes : profile.meetingType)}
-${profile.linkedinText ? `Career background (from LinkedIn): ${profile.linkedinText.slice(0, 1500)}` : ""}
+${line("Types of meetings", profile.meetingType)}
+${profile.linkedinText ? `Career background (from LinkedIn): ${profile.linkedinText.slice(0, 1200)}` : ""}
 
-THEIR PROFILES (build one entry per id):
-${profilesDesc}
+BUILD THIS ONE PROFILE: ${hat}
+${others.length ? `They also have these other profiles: ${others.join(", ")}. Keep this one focused on its own speciality and don't cover theirs.` : ""}
 
-For EACH profile, write what the assistant must focus on when they are in a meeting wearing that hat:
+Write what the assistant must focus on when they are in a meeting wearing this hat:
 - "summary": 2 sentences on how they add value in these meetings at this company.
-- "focusConcepts": 8-12 core concepts, frameworks and issues for this speciality with these tools at this company (e.g. for tracking with AppsFlyer + GTM at a trading app: SKAN & ATT, attribution windows, server-side tagging, event mapping for deposits, fraud protection, data discrepancies, incrementality).
-- "tools": each tool with a one-line "role": what it does for THEM at this company (max 15 words).
+- "focusConcepts": 8-12 core concepts, frameworks and issues for this speciality with these tools at this company. Short labels (max 5 words each).
+- "tools": each of this profile's tools with a one-line "role": what it does for THEM at this company (max 12 words).
 - "kpis": 3-6 metrics that matter in these meetings.
-- "typicalQuestions": 4-6 questions or debates that typically come up in these meetings.
-- "vocabulary": 10-25 terms, product names, brand names and jargon likely to be SPOKEN in these meetings (for speech recognition), including the company's own product names.
+- "typicalQuestions": 4-6 questions or debates that typically come up (max 15 words each).
+- "vocabulary": 10-20 terms, product names, brand names and jargon likely to be SPOKEN in these meetings, including the company's own product names.
 
-Never invent statistics or claims about the company's internal data.
+Never invent statistics or claims about the company's internal data. Keep it concise.
 
-Respond ONLY with JSON:
-{"profiles": {"main": {"name": "short label", "summary": "...", "focusConcepts": [], "tools": [{"name": "", "role": ""}], "kpis": [], "typicalQuestions": [], "vocabulary": []}${specs.map(s => `, "${s.id}": {...same shape...}`).join("")}}}`;
+Respond ONLY with JSON, no other text:
+{"name": "short label", "summary": "...", "focusConcepts": [], "tools": [{"name": "", "role": ""}], "kpis": [], "typicalQuestions": [], "vocabulary": []}`;
 }
 
 // The user's own edits survive rebuilds: concepts they added are always kept,
