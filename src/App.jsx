@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { whoBlock, activeFocus, keytermsFor, hasBrain, brainIsStale, brainSourceHash, buildRoleInferencePrompt, buildBrainPrompt, normaliseFocus, mergeUserEdits, trackConceptEdit } from "./brain.js";
 import { meetingAudioSupported, micTranscriptionSupported, getMicStream, pickMeetingAudio, stopStream, streamIsLive, MeetingTranscriber, formatTranscript } from "./meetingAudio.js";
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -180,7 +181,12 @@ async function updatePassword(password) {
 async function fetchIndustryPulse(profile, topic, goal) {
   const res = await authedFetch("/api/pulse", {
     method: "POST",
-    body: JSON.stringify({ topic, goal, role: profile.role, company: profile.company, platforms: profile.platforms, expertise: profile.expertise }),
+    body: JSON.stringify({
+      topic, goal, role: profile.role,
+      company: profile.brain?.company?.industry ? `${profile.company} (${profile.brain.company.industry})` : profile.company,
+      platforms: activeFocus(profile)?.tools?.map(t => t.name) || profile.platforms,
+      expertise: activeFocus(profile)?.focusConcepts || profile.expertise,
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !Array.isArray(data.items) || data.items.length === 0) throw new Error(data.error || "No recent news found.");
@@ -280,6 +286,8 @@ async function loadServerProfile() {
       communicationStyle: data.communication_style || "", meetingType: data.meeting_type || DEFAULT_PROFILE.meetingType,
       language: data.language?.code ? data.language : LANGUAGES[0],
       specialties: Array.isArray(data.specialties) ? data.specialties : [],
+      companyWebsite: data.company_website || "", roleDescription: data.role_description || "", linkedinText: data.linkedin_text || "",
+      brain: data.brain && typeof data.brain === "object" ? data.brain : null,
     };
   } catch { return undefined; }
 }
@@ -364,6 +372,8 @@ const DEFAULT_PROFILE = {
   communicationStyle: "",
   meetingType: "Campaign performance review", language: LANGUAGES[0],
   specialties: [], // specialist sub-profiles, e.g. "Tracking & Measurement"
+  companyWebsite: "", roleDescription: "", linkedinText: "",
+  brain: null, // AI-built understanding: see src/brain.js
 };
 
 // The profile used for a meeting: main profile, optionally focused through one
@@ -389,15 +399,7 @@ function effectiveProfile(base, specialtyId) {
 
 // ── PROMPTS ────────────────────────────────────────────────────────────────
 function profileBackground(profile) {
-  return [
-    `Role: ${profile.role}${profile.company ? " at " + profile.company : ""}`,
-    profile.activeSpecialty ? `Specialist focus for this meeting: ${profile.activeSpecialty.name}` : "",
-    profile.expertise?.length ? `Expertise: ${profile.expertise.join(", ")}` : "",
-    profile.platforms?.length ? `Platforms they know deeply: ${profile.platforms.join(", ")}` : "",
-    profile.jobContext ? `Their work: ${profile.jobContext}` : "",
-    profile.typicalAudience ? `Who they usually meet with: ${profile.typicalAudience}` : "",
-    profile.meetingObjective ? `What they want from meetings: ${profile.meetingObjective}` : "",
-  ].filter(Boolean).join("\n");
+  return whoBlock(profile);
 }
 
 // Deep, slow-changing talking points that let the user add real value
@@ -441,7 +443,9 @@ Respond ONLY with JSON:
 function buildQuickPrompt(profile, transcript, language, topic, avoid) {
   const translateNote = language.code !== "en-US" ? `The conversation may be in ${language.label}; write in English.` : "";
   const speakerNote = transcript.includes("Them: ") ? `"You:" lines are ${profile.name || "the user"}; "Them:" lines are the other people.` : "";
+  const focus = activeFocus(profile);
   return `You help ${profile.role}${profile.company ? " at " + profile.company : ""} during a live meeting${topic ? ` about "${topic}"` : ""}.
+${focus?.focusConcepts?.length ? `Their speciality in this meeting${focus.name ? ` (${focus.name})` : ""}: ${focus.focusConcepts.join(", ")}. Where it fits, lean ideas and questions towards this.` : ""}
 
 LATEST CONVERSATION (most recent last):
 """
@@ -464,10 +468,7 @@ function buildPrepPrompt(profile, topic, attendees, goal, concerns, data) {
   return `You are preparing a marketing professional for a meeting. Write a quick-glance brief they can scan in 30 seconds before and during the call: headlines and reminders, not an essay.
 
 WHO THEY ARE:
-${profile.name}, ${profile.role}${profile.company ? " at " + profile.company : ""}
-${profile.platforms?.length ? "Works with: " + profile.platforms.join(", ") : ""}
-${profile.expertise?.length ? "Expertise: " + profile.expertise.join(", ") : ""}
-${profile.jobContext ? "Background: " + profile.jobContext : ""}
+${whoBlock(profile)}
 Style: ${styleGuide}
 
 THE MEETING:
@@ -499,12 +500,7 @@ function buildBoardroomPrompt(profile, transcript, alreadyCovered) {
   return `You are an expert co-pilot listening to a live meeting on behalf of one specific person. Your job is NOT to tell them what to say. Your job is to spot moments where the discussion touches THEIR area of deep expertise, and give them substance.
 
 THE PERSON YOU SERVE:
-Name: ${profile.name}
-Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
-${profile.company ? "Company: Use what you know about " + profile.company + " — their product, industry, business model, and likely priorities." : ""}
-Deep expertise: ${profile.expertise.join(", ")}
-${profile.platforms && profile.platforms.length ? "Platforms/tools they work with daily: " + profile.platforms.join(", ") : ""}
-${profile.jobContext ? "What they actually do: " + profile.jobContext : ""}
+${whoBlock(profile)}
 
 RECENT CONVERSATION (verbatim):
 "${transcript}"
@@ -538,11 +534,7 @@ function buildSummaryPrompt(profile, transcript, goal, prepTopic, prepAttendees,
   return `You are debriefing a marketing professional after a meeting.
 
 PROFILE:
-Name: ${profile.name}
-Role: ${profile.role}${profile.company ? " at " + profile.company : ""}
-${profile.company ? "Company context: Use knowledge of " + profile.company + " to make lessons specific." : ""}
-Platforms: ${profile.platforms.join(", ")}
-Expertise: ${profile.expertise.join(", ")}
+${whoBlock(profile)}
 
 MEETING:
 Topic: ${prepTopic || "Not specified"}
@@ -558,8 +550,11 @@ Respond ONLY with a JSON object:
   "summary": [{ "point": "..." }],
   "your_contribution": [{ "type": "Strength", "text": "..." }, { "type": "Missed Opportunity", "text": "..." }],
   "lessons": [{ "title": "...", "text": "..." }],
-  "next_meeting_prep": [{ "action": "..." }]
-}`;
+  "next_meeting_prep": [{ "action": "..." }],
+  "profile_suggestions": [{ "term": "...", "why": "..." }]
+}
+
+"profile_suggestions": 0-3 concepts, tools or terms that came up meaningfully in THIS meeting, relate to their focus, and are NOT already in their "Core concepts to draw on" list. "term" max 5 words; "why" one short line. Return [] if nothing stands out.`;
 }
 
 // ── TYPE STYLES ────────────────────────────────────────────────────────────
@@ -806,14 +801,13 @@ function AccountMenu({ name, role, onGuide, onEditProfile, onSignOut }) {
 }
 
 // ── PROFILE EDITING & SPECIALIST PROFILES ─────────────────────────────────
-const ALL_SKILLS = [...new Set(MARKETING_ROLES.flatMap(r => r.skills))].sort();
 const SPECIALTY_ICONS = ["🎯", "📊", "🔬", "🖥️", "📡", "🧭", "🎨", "💡", "🛠️", "📈"];
 const SPECIALTY_STARTERS = [
-  { name: "Tracking & Measurement", icon: "🔬", expertise: ["Multi-touch attribution", "Incrementality testing", "Marketing ROI & attribution"] },
-  { name: "Programmatic Buying", icon: "🖥️", expertise: ["Programmatic advertising", "Bid strategy & optimisation", "Campaign performance analysis"] },
-  { name: "Brand & Creative", icon: "🎨", expertise: ["Brand strategy"] },
-  { name: "Growth & Experimentation", icon: "📈", expertise: ["A/B testing & experimentation", "Funnel analysis", "CAC & LTV optimisation"] },
-].map(st => ({ ...st, expertise: st.expertise.filter(x => ALL_SKILLS.includes(x)) }));
+  { name: "Tracking & Measurement", icon: "🔬", context: "Attribution, tracking setup, pixels and tags, and making sure the data can be trusted." },
+  { name: "Programmatic Buying", icon: "🖥️", context: "Buying media programmatically: DSPs, deals, bidding, audiences and supply quality." },
+  { name: "Brand & Creative", icon: "🎨", context: "Brand positioning, creative direction and how campaigns look and feel." },
+  { name: "Growth & Experimentation", icon: "📈", context: "Testing, funnel optimisation and growth experiments." },
+];
 
 const fieldLabel = { display: "block", fontSize: 11, fontWeight: 700, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", margin: "0 0 7px" };
 const textInput = { width: "100%", boxSizing: "border-box", background: "white", border: "1.5px solid #DDD6FE", borderRadius: 10, padding: "10px 12px", fontSize: 14, color: "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif", outline: "none" };
@@ -842,10 +836,12 @@ function ChipPicker({ options, selected, onChange, addPlaceholder }) {
   );
 }
 
-function SpecialtyForm({ initial, onSave, onCancel }) {
+// Expertise for a specialist profile is built by the AI (see buildBrain) from
+// its name, tools and description, so the form only asks for those.
+function SpecialtyForm({ initial, onSave, onCancel, toolOptions }) {
   const [sp, setSp] = useState(initial);
   const set = (k, v) => setSp(x => ({ ...x, [k]: v }));
-  const valid = sp.name.trim() && (sp.expertise.length || sp.context.trim());
+  const valid = sp.name.trim() && (sp.platforms.length || sp.context.trim());
   return (
     <div style={{ background: "#FAFAFF", border: "1.5px solid #C4B5FD", borderRadius: 14, padding: 18, marginBottom: 12, textAlign: "left" }}>
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
@@ -860,11 +856,8 @@ function SpecialtyForm({ initial, onSave, onCancel }) {
           <input value={sp.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Tracking & Measurement" style={textInput} autoFocus />
         </div>
       </div>
-      <label style={fieldLabel}>Expertise for this hat</label>
-      <ChipPicker options={ALL_SKILLS} selected={sp.expertise} onChange={v => set("expertise", v)} addPlaceholder="Add a skill, e.g. Pixel & tag implementation" />
-      <div style={{ height: 14 }} />
       <label style={fieldLabel}>Platforms & tools for this hat</label>
-      <ChipPicker options={PLATFORMS.map(p => p.label)} selected={sp.platforms} onChange={v => set("platforms", v)} addPlaceholder="Add a tool, e.g. AppsFlyer, GA4, GTM" />
+      <ChipPicker options={toolOptions?.length ? toolOptions : PLATFORMS.map(p => p.label)} selected={sp.platforms} onChange={v => set("platforms", v)} addPlaceholder="Add a tool, e.g. AppsFlyer, GA4, Google Tag Manager" />
       <div style={{ height: 14 }} />
       <label style={fieldLabel}>What you bring to these meetings</label>
       <textarea value={sp.context} onChange={e => set("context", e.target.value)} rows={3} placeholder="e.g. I own tracking and measurement: MMP setup, pixels and server-side events, attribution windows and incrementality testing. I'm usually the person explaining why numbers don't match." style={{ ...textInput, resize: "vertical" }} />
@@ -879,7 +872,7 @@ function SpecialtyForm({ initial, onSave, onCancel }) {
   );
 }
 
-function SpecialtiesManager({ specialties, onChange, mainProfile }) {
+function SpecialtiesManager({ specialties, onChange, mainProfile, toolOptions }) {
   const [editing, setEditing] = useState(null); // specialty object being edited / created
   const blank = (starter = {}) => ({ id: `sp_${Date.now().toString(36)}`, name: "", icon: "🎯", expertise: [], platforms: [], context: "", audience: "", ...starter });
   const save = (sp) => {
@@ -897,7 +890,7 @@ function SpecialtiesManager({ specialties, onChange, mainProfile }) {
         <span style={{ fontSize: 11, color: "#9B8FC0" }}>default</span>
       </div>
       {specialties.map(sp => editing?.id === sp.id ? (
-        <SpecialtyForm key={sp.id} initial={editing} onSave={save} onCancel={() => setEditing(null)} />
+        <SpecialtyForm key={sp.id} initial={editing} onSave={save} onCancel={() => setEditing(null)} toolOptions={toolOptions} />
       ) : (
         <div key={sp.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "white", border: "1px solid #E9E5FB", borderRadius: 12, padding: "11px 14px", marginBottom: 10 }}>
           <span style={{ fontSize: 18 }}>{sp.icon || "🎯"}</span>
@@ -909,7 +902,7 @@ function SpecialtiesManager({ specialties, onChange, mainProfile }) {
           <button type="button" onClick={() => { if (window.confirm(`Delete the "${sp.name}" specialist profile?`)) onChange(specialties.filter(x => x.id !== sp.id)); }} aria-label={`Delete ${sp.name}`} style={{ background: "white", border: "1px solid #FECACA", color: "#B91C1C", borderRadius: 8, padding: "5px 9px", fontSize: 12, cursor: "pointer" }}>✕</button>
         </div>
       ))}
-      {editing && !specialties.some(x => x.id === editing.id) && <SpecialtyForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {editing && !specialties.some(x => x.id === editing.id) && <SpecialtyForm initial={editing} onSave={save} onCancel={() => setEditing(null)} toolOptions={toolOptions} />}
       {!editing && (
         <>
           <button type="button" onClick={() => setEditing(blank())} style={{ width: "100%", background: "white", border: "1.5px dashed #A78BFA", color: "#6D28D9", borderRadius: 12, padding: "12px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>＋ Add a specialist profile</button>
@@ -950,82 +943,138 @@ function ProfilePicker({ profile, value, onChange, compact }) {
 }
 
 function ProfileEditor({ profile: initial, onSave, onCancel, onRedoOnboarding }) {
-  const [p, setP] = useState({ ...DEFAULT_PROFILE, ...initial, specialties: initial.specialties || [] });
-  const [saving, setSaving] = useState(false);
+  const [p, setP] = useState(() => ({ ...DEFAULT_PROFILE, ...initial, specialties: initial.specialties || [], roleDescription: initial.roleDescription || initial.jobContext || "" }));
+  const [busy, setBusy] = useState("");       // what the AI is doing right now
+  const [brainError, setBrainError] = useState("");
   const [message, setMessage] = useState(null);
+  const [showLinkedin, setShowLinkedin] = useState(!!initial.linkedinText);
   const set = (k, v) => setP(x => ({ ...x, [k]: v }));
+  const setBrainPart = (k, v) => setP(x => ({ ...x, brain: { ...(x.brain || {}), [k]: v } }));
   const valid = p.name.trim() && p.role.trim();
-  const save = async () => {
-    setSaving(true); setMessage(null);
-    const synced = await onSave(p);
-    setSaving(false);
-    if (!synced) setMessage({ kind: "warn", text: "Saved on this device, but we couldn't sync it to your account. It'll retry next time you save." });
+  const stale = brainIsStale(p);
+
+  const refreshCompany = async () => {
+    setBusy("Looking up your company…");
+    try { setBrainPart("company", await lookupCompany(p)); setMessage(null); }
+    catch (e) { setMessage({ text: e.message }); }
+    setBusy("");
   };
-  const Section = ({ title, sub, children }) => (
+  const refreshRole = async () => {
+    setBusy("Re-analysing your role…");
+    try { const r = await inferRole(p); setBrainPart("role", r.role); setMessage(null); }
+    catch (e) { setMessage({ text: e.message }); }
+    setBusy("");
+  };
+  const rebuild = async (base = p) => {
+    setBusy("Building your profile: working out what matters in your meetings…"); setBrainError("");
+    try { const next = await buildBrain(base); setP(next); setBusy(""); return next; }
+    catch (e) { setBrainError(e.message); setBusy(""); return null; }
+  };
+  // Upgrade path for profiles created before the brain existed
+  const buildEverything = async () => {
+    let next = p;
+    try {
+      if (next.company && !next.brain?.company) { setBusy("Looking up your company…"); next = { ...next, brain: { ...(next.brain || {}), company: await lookupCompany(next) } }; setP(next); }
+      if (!next.brain?.role && (next.roleDescription || next.role)) { setBusy("Understanding your role…"); const r = await inferRole(next); next = { ...next, brain: { ...next.brain, role: r.role }, platforms: [...new Set([...next.platforms, ...r.platforms])] }; setP(next); }
+    } catch (e) { setMessage({ text: e.message }); }
+    await rebuild(next);
+  };
+
+  const save = async () => {
+    setMessage(null);
+    let toSave = p;
+    if (brainIsStale(p) && (p.brain?.profiles || p.brain?.role)) {
+      const rebuilt = await rebuild(p); // inputs changed: keep the brain in sync
+      if (rebuilt) toSave = rebuilt;
+      else setMessage({ text: "Saved, but we couldn't update your profile brain. Try ↻ Rebuild below." });
+    }
+    setBusy("Saving…");
+    const synced = await onSave(toSave);
+    setBusy("");
+    if (!synced) setMessage({ text: "Saved on this device, but we couldn't sync it to your account. It'll retry next time you save." });
+  };
+
+  const Section = ({ title, sub, action, children }) => (
     <section style={{ background: "white", border: "1px solid #E9E5FB", borderRadius: 16, padding: "20px 22px", marginBottom: 16 }}>
-      <h3 style={{ margin: "0 0 4px", fontSize: 16, color: "#3B0764", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{title}</h3>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 16, color: "#3B0764", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{title}</h3>
+        {action && <div style={{ marginLeft: "auto" }}>{action}</div>}
+      </div>
       {sub && <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "#7C6BA8", lineHeight: 1.55 }}>{sub}</p>}
       {children}
     </section>
   );
+  const linkBtn = (label, onClick) => <button type="button" onClick={onClick} disabled={!!busy} style={{ background: "none", border: "none", color: "#6D28D9", fontSize: 12.5, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1 }}>{label}</button>;
+
   return (
     <div style={{ minHeight: "100vh", background: "#F5F3FF", fontFamily: "'Plus Jakarta Sans', sans-serif", textAlign: "left" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'); *{box-sizing:border-box}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap'); *{box-sizing:border-box} @keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <div style={{ background: "#3B0764", padding: "12px 22px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 10 }}>
         <button onClick={onCancel} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "white", borderRadius: 8, width: 34, height: 34, cursor: "pointer", fontSize: 16 }} aria-label="Back">‹</button>
         <span style={{ color: "white", fontWeight: 700, fontSize: 16, fontFamily: "'Fraunces', Georgia, serif" }}>Edit profile</span>
+        {busy && <span style={{ color: "#C4B5FD", fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}><span style={{ width: 12, height: 12, border: "2px solid #C4B5FD", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />{busy}</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button onClick={onCancel} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.25)", color: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "7px 14px", fontSize: 13, cursor: "pointer" }}>Cancel</button>
-          <button onClick={save} disabled={!valid || saving} style={{ background: valid ? "#8B5CF6" : "#6B5B95", border: "none", color: "white", borderRadius: 8, padding: "7px 18px", fontSize: 13, fontWeight: 700, cursor: valid ? "pointer" : "not-allowed" }}>{saving ? "Saving…" : "Save changes"}</button>
+          <button onClick={save} disabled={!valid || !!busy} style={{ background: valid ? "#8B5CF6" : "#6B5B95", border: "none", color: "white", borderRadius: 8, padding: "7px 18px", fontSize: 13, fontWeight: 700, cursor: valid && !busy ? "pointer" : "not-allowed" }}>{busy ? "Working…" : "Save changes"}</button>
         </div>
       </div>
       <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 20px 60px" }}>
         {message && <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 16 }}>{message.text}</div>}
 
-        {Section({ title: "About you", children: (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div><label style={fieldLabel}>Name *</label><input value={p.name} onChange={e => set("name", e.target.value)} style={textInput} /></div>
-            <div><label style={fieldLabel}>Job title *</label><input value={p.role} onChange={e => set("role", e.target.value)} style={textInput} /></div>
-            <div><label style={fieldLabel}>Company</label><input value={p.company || ""} onChange={e => set("company", e.target.value)} style={textInput} /></div>
-            <div><label style={fieldLabel}>Role type</label>
-              <select value={p.roleId || ""} onChange={e => set("roleId", e.target.value)} style={textInput}>
-                <option value="">Choose…</option>
-                {MARKETING_ROLES.map(r => <option key={r.id} value={r.id}>{r.icon} {r.label}</option>)}
-              </select>
+        {!p.brain?.profiles && (
+          <div style={{ background: "linear-gradient(135deg, #3B0764, #6D28D9)", color: "white", borderRadius: 16, padding: "20px 22px", marginBottom: 16, display: "flex", gap: 16, alignItems: "center" }}>
+            <div style={{ fontSize: 30 }}>✨</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Upgrade your profile</div>
+              <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.55 }}>Let Unmute look up your company, understand your role and build a focused profile for each hat you wear. Briefs and suggestions get much sharper.</div>
             </div>
+            <button onClick={buildEverything} disabled={!!busy} style={{ background: "white", color: "#5B21B6", border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>{busy ? "Working…" : "Build it now"}</button>
           </div>
-        ) })}
+        )}
 
-        {Section({ title: "Main expertise", sub: "Your general areas of expertise. Used whenever you're on your main profile.", children: (
-          <ChipPicker options={ALL_SKILLS} selected={p.expertise} onChange={v => set("expertise", v)} addPlaceholder="Add your own skill…" />
-        ) })}
-
-        {Section({ title: "Specialist profiles", sub: "Wear different hats? Add a specialist profile for each speciality, e.g. Tracking & Measurement. Pick it when you prep a meeting and suggestions will lean on that expertise.", children: (
-          <SpecialtiesManager specialties={p.specialties} onChange={v => set("specialties", v)} mainProfile={p} />
-        ) })}
-
-        {Section({ title: "Platforms", children: (
-          <ChipPicker options={PLATFORMS.map(x => x.label)} selected={p.platforms} onChange={v => set("platforms", v)} addPlaceholder="Add a platform or tool…" />
-        ) })}
-
-        {Section({ title: "Your work", children: (
+        {Section({ title: "About you", children: (
           <>
-            <label style={fieldLabel}>What do you do day to day?</label>
-            <textarea value={p.jobContext || ""} onChange={e => set("jobContext", e.target.value)} rows={3} style={{ ...textInput, resize: "vertical", marginBottom: 14 }} />
-            <label style={fieldLabel}>What are you typically trying to achieve in meetings?</label>
-            <textarea value={p.meetingObjective || ""} onChange={e => set("meetingObjective", e.target.value)} rows={2} style={{ ...textInput, resize: "vertical", marginBottom: 14 }} />
-            <label style={fieldLabel}>Who do you typically meet with?</label>
-            <input value={p.typicalAudience || ""} onChange={e => set("typicalAudience", e.target.value)} style={textInput} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div><label style={fieldLabel}>Name *</label><input value={p.name} onChange={e => set("name", e.target.value)} style={textInput} /></div>
+              <div><label style={fieldLabel}>Job title *</label><input value={p.role} onChange={e => set("role", e.target.value)} style={textInput} /></div>
+              <div><label style={fieldLabel}>Company</label><input value={p.company || ""} onChange={e => set("company", e.target.value)} style={textInput} /></div>
+              <div><label style={fieldLabel}>Company website</label><input value={p.companyWebsite || ""} onChange={e => set("companyWebsite", e.target.value)} placeholder="e.g. etoro.com" style={textInput} /></div>
+            </div>
+            <div style={{ marginTop: 14 }}>
+              {showLinkedin ? (
+                <>
+                  <label style={fieldLabel}>LinkedIn About / Experience (optional)</label>
+                  <textarea value={p.linkedinText || ""} onChange={e => set("linkedinText", e.target.value)} rows={4} placeholder="Paste your LinkedIn About section and recent roles." style={{ ...textInput, resize: "vertical" }} />
+                </>
+              ) : linkBtn("＋ Tip: paste your LinkedIn About / Experience for sharper suggestions", () => setShowLinkedin(true))}
+            </div>
           </>
         ) })}
 
-        {Section({ title: "Style & defaults", children: (
+        {Section({ title: "Your company", sub: "Used in every brief and suggestion.", action: p.company ? linkBtn("↻ Look up again", refreshCompany) : null, children: (
+          p.brain?.company ? <CompanyCardEditor card={p.brain.company} onChange={c => setBrainPart("company", c)} />
+            : <div style={{ fontSize: 13, color: "#9B8FC0" }}>{p.company ? "Not looked up yet. Click ↻ Look up again." : "Add your company above."}</div>
+        ) })}
+
+        {Section({ title: "Your role", action: linkBtn("↻ Re-analyse", refreshRole), children: (
           <>
-            <label style={fieldLabel}>How do you want to come across?</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 16 }}>
-              {COMMUNICATION_STYLES.map(st => <button type="button" key={st.id} title={st.desc} onClick={() => set("communicationStyle", st.id)} style={chip(p.communicationStyle === st.id)}>{st.icon} {st.label}</button>)}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <label style={fieldLabel}>What you do, in your own words</label>
+            <textarea value={p.roleDescription || ""} onChange={e => set("roleDescription", e.target.value)} rows={3} style={{ ...textInput, resize: "vertical", marginBottom: 14 }} />
+            {p.brain?.role && <RoleInsightsEditor role={p.brain.role} onChange={r => setBrainPart("role", r)} />}
+          </>
+        ) })}
+
+        {Section({ title: "Platforms & tools", children: (
+          <ChipPicker options={PLATFORMS.map(x => x.label)} selected={p.platforms} onChange={v => set("platforms", v)} addPlaceholder="Add a platform or tool…" />
+        ) })}
+
+        {Section({ title: "Your profiles", sub: "Your main profile plus a specialist profile for each different hat you wear. Pick one when you prep a meeting.", children: (
+          <SpecialtiesManager specialties={p.specialties} onChange={v => set("specialties", v)} mainProfile={{ ...p, expertise: p.brain?.role?.responsibilities || p.expertise }} toolOptions={p.platforms} />
+        ) })}
+
+        {Section({ title: "Your meetings", children: (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
               <div><label style={fieldLabel}>Most common meeting type</label>
                 <select value={p.meetingType} onChange={e => set("meetingType", e.target.value)} style={textInput}>{MEETING_TYPES.map(t => <option key={t}>{t}</option>)}</select>
               </div>
@@ -1033,13 +1082,201 @@ function ProfileEditor({ profile: initial, onSave, onCancel, onRedoOnboarding })
                 <select value={p.language?.code} onChange={e => set("language", LANGUAGES.find(l => l.code === e.target.value))} style={textInput}>{LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.label}</option>)}</select>
               </div>
             </div>
+            <label style={fieldLabel}>Who do you usually meet with?</label>
+            <input value={p.typicalAudience || ""} onChange={e => set("typicalAudience", e.target.value)} style={{ ...textInput, marginBottom: 14 }} />
+            <label style={fieldLabel}>How do you want to come across?</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {COMMUNICATION_STYLES.map(st => <button type="button" key={st.id} title={st.desc} onClick={() => set("communicationStyle", st.id)} style={chip(p.communicationStyle === st.id)}>{st.icon} {st.label}</button>)}
+            </div>
           </>
+        ) })}
+
+        {p.brain?.profiles && Section({ title: "What Unmute understands about you", sub: stale ? "You've changed things this is built from. It'll update automatically when you save, or click ↻ Rebuild now." : "This is what Unmute focuses on in your meetings. Edit anything.", children: (
+          <BrainReview profile={p} onChange={setP} building={busy.startsWith("Building")} error={brainError} onRebuild={() => rebuild()} />
         ) })}
 
         <p style={{ textAlign: "center", fontSize: 12, color: "#9B8FC0" }}>
           Prefer the guided setup? <button onClick={onRedoOnboarding} style={{ background: "none", border: "none", color: "#6D28D9", textDecoration: "underline", cursor: "pointer", fontSize: 12 }}>Redo onboarding</button>
         </p>
       </div>
+    </div>
+  );
+}
+
+// ── PROFILE BRAIN: AI steps ───────────────────────────────────────────────
+async function lookupCompany(profile) {
+  const res = await authedFetch("/api/company", { method: "POST", body: JSON.stringify({ company: profile.company, website: profile.companyWebsite, title: profile.role }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.card) throw new Error(data.error || "Couldn't look up your company.");
+  return data.card;
+}
+
+async function inferRole(profile) {
+  const raw = await callClaude(buildRoleInferencePrompt(profile, PLATFORMS.map(p => p.label)));
+  const d = safeParse(raw);
+  if (!d || !d.summary) throw new Error("Couldn't work out your role. Please try again.");
+  const l = (v) => (Array.isArray(v) ? v : []).map(x => String(x).slice(0, 100)).filter(Boolean);
+  return {
+    role: { summary: String(d.summary).slice(0, 300), responsibilities: l(d.responsibilities).slice(0, 8), channels: l(d.channels).slice(0, 10), kpis: l(d.kpis).slice(0, 8) },
+    platforms: l(d.platforms).slice(0, 15),
+    suggestedProfiles: (Array.isArray(d.suggestedProfiles) ? d.suggestedProfiles : []).slice(0, 3).filter(x => x?.name).map(x => ({
+      name: String(x.name).slice(0, 60), icon: String(x.icon || "🎯").slice(0, 4), platforms: l(x.platforms).slice(0, 10), context: String(x.context || "").slice(0, 400),
+    })),
+  };
+}
+
+// Builds the per-profile focus for main + every specialist profile and returns
+// the updated profile (expertise/jobContext are kept in sync for older code).
+async function buildBrain(profile) {
+  const raw = await callClaudeLong(buildBrainPrompt(profile));
+  const d = safeParse(raw);
+  if (!d?.profiles?.main) throw new Error("Couldn't build your profile. Please try again.");
+  const prev = profile.brain?.profiles || {};
+  const profiles = { main: mergeUserEdits(normaliseFocus(d.profiles.main, "Main profile"), prev.main) };
+  for (const sp of profile.specialties || []) {
+    const f = mergeUserEdits(normaliseFocus(d.profiles[sp.id], sp.name), prev[sp.id]);
+    if (f) profiles[sp.id] = { ...f, name: sp.name };
+  }
+  const next = { ...profile, brain: { ...(profile.brain || {}), profiles, builtAt: new Date().toISOString() } };
+  next.expertise = profiles.main.focusConcepts.slice(0, 10);
+  next.specialties = (profile.specialties || []).map(sp => profiles[sp.id] ? { ...sp, expertise: profiles[sp.id].focusConcepts.slice(0, 10) } : sp);
+  if (!next.jobContext && next.roleDescription) next.jobContext = next.roleDescription;
+  next.brain.sourceHash = brainSourceHash(next);
+  return next;
+}
+
+// ── PROFILE BRAIN: UI ─────────────────────────────────────────────────────
+// Stable (module-level) layout pieces so inputs inside them keep focus
+function OBCard({ children }) {
+  return <div style={{ background: "white", borderRadius: 18, padding: "36px 44px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 680, textAlign: "left" }}>{children}</div>;
+}
+function OBH2({ children }) { return <h2 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>{children}</h2>; }
+function OBSub({ children }) { return <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 14, lineHeight: 1.6 }}>{children}</p>; }
+function Thinking({ text }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 12, padding: "16px 18px", color: "#5B21B6", fontSize: 14, fontWeight: 600 }}>
+      <div style={{ width: 18, height: 18, border: "2.5px solid #7C3AED", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
+      {text}
+    </div>
+  );
+}
+
+function ChipListEditor({ items, onChange, placeholder, tone = "#EDE9FE", text = "#5B21B6" }) {
+  const [val, setVal] = useState("");
+  const add = () => { const t = val.trim(); if (t && !items.includes(t)) onChange([...items, t]); setVal(""); };
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {items.map(it => (
+          <span key={it} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: tone, color: text, borderRadius: 16, padding: "5px 6px 5px 11px", fontSize: 12.5, fontWeight: 500 }}>
+            {it}
+            <button type="button" onClick={() => onChange(items.filter(x => x !== it))} aria-label={`Remove ${it}`} style={{ background: "rgba(255,255,255,0.7)", border: "none", borderRadius: "50%", width: 18, height: 18, fontSize: 11, lineHeight: 1, color: text, cursor: "pointer" }}>×</button>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }} placeholder={placeholder} style={{ ...textInput, padding: "7px 10px", fontSize: 13 }} />
+        <button type="button" onClick={add} style={{ background: "white", border: "1px solid #C4B5FD", color: "#6D28D9", borderRadius: 8, padding: "0 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Add</button>
+      </div>
+    </div>
+  );
+}
+
+function CompanyCardEditor({ card, onChange }) {
+  const set = (k, v) => onChange({ ...card, [k]: v });
+  return (
+    <div style={{ border: "1.5px solid #DDD6FE", borderRadius: 14, padding: 18, background: "#FAFAFF" }}>
+      <label style={fieldLabel}>What the company does</label>
+      <textarea value={card.summary || ""} onChange={e => set("summary", e.target.value)} rows={2} style={{ ...textInput, resize: "vertical", marginBottom: 12 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div><label style={fieldLabel}>Industry</label><input value={card.industry || ""} onChange={e => set("industry", e.target.value)} style={textInput} /></div>
+        <div><label style={fieldLabel}>Customers</label><input value={card.customers || ""} onChange={e => set("customers", e.target.value)} style={textInput} /></div>
+      </div>
+      <label style={fieldLabel}>Regulation that affects marketing</label>
+      <input value={card.regulation || ""} onChange={e => set("regulation", e.target.value)} placeholder="e.g. FCA financial promotions rules" style={{ ...textInput, marginBottom: 12 }} />
+      <label style={fieldLabel}>Products</label>
+      <div style={{ marginBottom: 12 }}><ChipListEditor items={card.products || []} onChange={v => set("products", v)} placeholder="Add a product" /></div>
+      <label style={fieldLabel}>Markets</label>
+      <div style={{ marginBottom: 12 }}><ChipListEditor items={card.markets || []} onChange={v => set("markets", v)} placeholder="Add a market" /></div>
+      <label style={fieldLabel}>Competitors</label>
+      <ChipListEditor items={card.competitors || []} onChange={v => set("competitors", v)} placeholder="Add a competitor" />
+    </div>
+  );
+}
+
+function RoleInsightsEditor({ role, onChange }) {
+  const set = (k, v) => onChange({ ...role, [k]: v });
+  return (
+    <div style={{ border: "1.5px solid #DDD6FE", borderRadius: 14, padding: 18, background: "#FAFAFF" }}>
+      <label style={fieldLabel}>Your role in a sentence</label>
+      <textarea value={role.summary || ""} onChange={e => set("summary", e.target.value)} rows={2} style={{ ...textInput, resize: "vertical", marginBottom: 12 }} />
+      <label style={fieldLabel}>What you're responsible for</label>
+      <div style={{ marginBottom: 12 }}><ChipListEditor items={role.responsibilities || []} onChange={v => set("responsibilities", v)} placeholder="Add a responsibility" /></div>
+      <label style={fieldLabel}>Channels</label>
+      <div style={{ marginBottom: 12 }}><ChipListEditor items={role.channels || []} onChange={v => set("channels", v)} placeholder="Add a channel" /></div>
+      <label style={fieldLabel}>What you're judged on (KPIs)</label>
+      <ChipListEditor items={role.kpis || []} onChange={v => set("kpis", v)} placeholder="Add a KPI" tone="#DCFCE7" text="#166534" />
+    </div>
+  );
+}
+
+// "Here's what Unmute understands about you": every part editable
+function BrainReview({ profile, onChange, building, error, onRebuild }) {
+  const [tab, setTab] = useState("main");
+  const brain = profile.brain || {};
+  const tabs = [{ id: "main", name: "Main profile", icon: "⭐" }, ...(profile.specialties || []).map(sp => ({ id: sp.id, name: sp.name, icon: sp.icon || "🎯" }))];
+  const activeTab = tabs.some(t => t.id === tab) ? tab : "main";
+  const focus = brain.profiles?.[activeTab];
+  const setFocus = (k, v) => onChange({ ...profile, brain: { ...brain, profiles: { ...brain.profiles, [activeTab]: { ...focus, [k]: v } } } });
+  const c = brain.company;
+  return (
+    <div>
+      {c && (
+        <div style={{ background: "#3B0764", color: "white", borderRadius: 14, padding: "14px 18px", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, opacity: 0.7, fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Your company</div>
+          <div style={{ fontSize: 14, lineHeight: 1.55 }}><strong>{c.name}</strong>: {c.summary}</div>
+          {c.regulation && <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>⚖️ {c.regulation}</div>}
+        </div>
+      )}
+      {brain.role?.summary && (
+        <div style={{ background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 14, padding: "12px 18px", marginBottom: 16, fontSize: 13.5, color: "#3B0764", lineHeight: 1.55 }}>
+          <span style={{ fontSize: 11, color: "#7C6BA8", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", display: "block", marginBottom: 3 }}>Your role</span>
+          {brain.role.summary}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {tabs.map(t => <button type="button" key={t.id} onClick={() => setTab(t.id)} style={chip(activeTab === t.id)}>{t.icon} {t.name}</button>)}
+        <button type="button" onClick={onRebuild} disabled={building} style={{ ...chip(false), marginLeft: "auto", borderStyle: "dashed", color: "#6D28D9", opacity: building ? 0.5 : 1 }}>↻ Rebuild</button>
+      </div>
+      {building && <Thinking text="Building your profile: working out what matters in your meetings…" />}
+      {!building && error && <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#B91C1C", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>{error}</div>}
+      {!building && focus && (
+        <div style={{ border: "1.5px solid #DDD6FE", borderRadius: 14, padding: 18 }}>
+          <label style={fieldLabel}>How you add value in these meetings</label>
+          <textarea value={focus.summary} onChange={e => setFocus("summary", e.target.value)} rows={2} style={{ ...textInput, resize: "vertical", marginBottom: 14 }} />
+          <label style={fieldLabel}>Core concepts Unmute will focus on</label>
+          <div style={{ marginBottom: 14 }}><ChipListEditor items={focus.focusConcepts} onChange={v => onChange({ ...profile, brain: { ...brain, profiles: { ...brain.profiles, [activeTab]: trackConceptEdit(focus, v) } } })} placeholder="Add a concept, e.g. Server-side tagging" /></div>
+          <label style={fieldLabel}>Your tools, and what they do for you</label>
+          <div style={{ marginBottom: 14, display: "grid", gap: 6 }}>
+            {focus.tools.map((t, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: "#1E1033", minWidth: 130 }}>{t.name}</span>
+                <input value={t.role} onChange={e => setFocus("tools", focus.tools.map((x, j) => j === i ? { ...x, role: e.target.value } : x))} style={{ ...textInput, padding: "6px 10px", fontSize: 13 }} />
+              </div>
+            ))}
+          </div>
+          <label style={fieldLabel}>KPIs that matter here</label>
+          <div style={{ marginBottom: 14 }}><ChipListEditor items={focus.kpis} onChange={v => setFocus("kpis", v)} placeholder="Add a KPI" tone="#DCFCE7" text="#166534" /></div>
+          <label style={fieldLabel}>Debates that typically come up</label>
+          <div style={{ marginBottom: 14 }}><ChipListEditor items={focus.typicalQuestions} onChange={v => setFocus("typicalQuestions", v)} placeholder="Add a typical question" tone="#ECFEFF" text="#0E7490" /></div>
+          <details>
+            <summary style={{ cursor: "pointer", fontSize: 12.5, color: "#6D28D9", fontWeight: 600 }}>Words Unmute will listen out for ({focus.vocabulary.length})</summary>
+            <p style={{ fontSize: 12, color: "#9B8FC0", margin: "8px 0" }}>Names and jargon from your world, so the transcription gets them right.</p>
+            <ChipListEditor items={focus.vocabulary} onChange={v => setFocus("vocabulary", v)} placeholder="Add a word or name" tone="#F3F4F6" text="#374151" />
+          </details>
+        </div>
+      )}
+      {!building && !focus && !error && <div style={{ color: "#9B8FC0", fontSize: 13 }}>This profile hasn't been built yet. Click ↻ Rebuild.</div>}
     </div>
   );
 }
@@ -1053,24 +1290,76 @@ function Onboarding({ onComplete, initialName = "" }) {
 
   const update = (key, val) => setProfile(p => ({ ...p, [key]: val }));
 
-  const togglePlatform = (id) => setProfile(p => ({ ...p, platforms: p.platforms.includes(id) ? p.platforms.filter(x => x !== id) : [...p.platforms, id] }));
-  const toggleSkill = (skill) => setProfile(p => ({ ...p, expertise: p.expertise.includes(skill) ? p.expertise.filter(s => s !== skill) : [...p.expertise, skill] }));
+  const setBrainPart = (key, val) => setProfile(p => ({ ...p, brain: { ...(p.brain || {}), [key]: val } }));
 
-  const selectRole = (r) => setProfile(p => ({ ...p, roleId: r.id, role: r.label, expertise: [...r.skills] }));
+  // AI steps: company lookup → role inference → brain build
+  const [companyState, setCompanyState] = useState({ loading: false, error: "", key: "" });
+  const [roleState, setRoleState] = useState({ loading: false, error: "", key: "" });
+  const [brainState, setBrainState] = useState({ loading: false, error: "" });
+  const [suggested, setSuggested] = useState([]);
+  const [showLinkedin, setShowLinkedin] = useState(false);
+
+  const runCompanyLookup = async () => {
+    const key = `${profile.company}|${profile.companyWebsite}`;
+    if (companyState.key === key && profile.brain?.company) return;
+    setCompanyState({ loading: true, error: "", key });
+    try {
+      const card = await lookupCompany(profile);
+      setBrainPart("company", card);
+      setCompanyState({ loading: false, error: card.confident ? "" : "We weren't 100% sure we found the right company. Please check and correct the details.", key });
+    } catch (e) {
+      setBrainPart("company", { name: profile.company, summary: "", industry: "", products: [], markets: [], customers: "", regulation: "", competitors: [], marketingContext: "" });
+      setCompanyState({ loading: false, error: `${e.message} Just describe it in a sentence below.`, key });
+    }
+  };
+
+  const runRoleInference = async () => {
+    const key = `${profile.role}|${profile.roleDescription}|${profile.brain?.company?.summary}`;
+    if (roleState.key === key && profile.brain?.role) return;
+    setRoleState({ loading: true, error: "", key });
+    try {
+      const r = await inferRole(profile);
+      setProfile(p => ({
+        ...p,
+        brain: { ...(p.brain || {}), role: r.role },
+        platforms: [...new Set([...(p.platforms || []), ...r.platforms])],
+        jobContext: p.roleDescription,
+      }));
+      setSuggested(r.suggestedProfiles);
+      setRoleState({ loading: false, error: "", key });
+    } catch (e) {
+      setBrainPart("role", { summary: profile.roleDescription, responsibilities: [], channels: [], kpis: [] });
+      setRoleState({ loading: false, error: e.message, key });
+    }
+  };
+
+  const runBrainBuild = async (force = false) => {
+    if (!force && !brainIsStale(profile)) return;
+    setBrainState({ loading: true, error: "" });
+    try {
+      const next = await buildBrain(profile);
+      setProfile(next);
+      setBrainState({ loading: false, error: "" });
+    } catch (e) { setBrainState({ loading: false, error: e.message }); }
+  };
 
   const canNext = () => {
-    if (step === 1) return profile.name.trim() && profile.role.trim();
-    if (step === 2) return profile.roleId !== "";
-    if (step === 3) return profile.platforms.length > 0;
+    if (step === 1) return profile.name.trim() && profile.role.trim() && profile.company.trim();
     return true;
   };
+
+  // Build (or rebuild, if inputs changed) the brain when reaching the review step
+  useEffect(() => {
+    if (step === 8 && !brainState.loading) runBrainBuild();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   // Saves locally AND to the user's account (previously this only saved to the
   // browser, so profiles never reached Supabase).
   const finish = () => onComplete(profile);
 
   const Progress = () => {
-    const phase = step <= 3 ? "Setting up your profile…" : step <= 7 ? "Personalising your suggestions…" : step === 9 ? "Using Unmute in your calls…" : "Almost ready…";
+    const phase = step <= 2 ? "Getting to know you…" : step <= 5 ? "Understanding your role…" : step === 8 ? "Building your profile…" : step === 9 ? "Using Unmute in your calls…" : "Almost ready…";
     return (
       <div style={{ marginBottom: 28 }}>
         <div style={{ display: "flex", gap: 5, marginBottom: 8 }}>
@@ -1091,25 +1380,22 @@ function Onboarding({ onComplete, initialName = "" }) {
     </div>
   );
 
-  const Card = ({ children }) => (
-    <div style={{ background: "white", borderRadius: 18, padding: "40px 48px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)", width: "100%", maxWidth: 640 }}>
-      {children}
-    </div>
-  );
-
-  const H2 = ({ children }) => <h2 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 700, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>{children}</h2>;
-  const Sub = ({ children }) => <p style={{ margin: "0 0 22px", color: "#6b7280", fontSize: 14, lineHeight: 1.6 }}>{children}</p>;
+  // Module-level components keep inputs focused while typing
+  const Card = OBCard;
+  const H2 = OBH2;
+  const Sub = OBSub;
 
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 60%, #E0D9F5 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
         @keyframes slideIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes spin{to{transform:rotate(360deg)}}
         *{box-sizing:border-box} input,textarea{outline:none} button{cursor:pointer;transition:all .15s} textarea{resize:vertical}
         input::placeholder,textarea::placeholder{color:#9ca3af}
       `}</style>
 
-      <div style={{ width: "100%", maxWidth: 640 }}>
+      <div style={{ width: "100%", maxWidth: 680 }}>
 
         {/* Step 0 — Welcome */}
         {step === 0 && (
@@ -1133,121 +1419,115 @@ function Onboarding({ onComplete, initialName = "" }) {
           </Card>
         )}
 
-        {/* Step 1 — Name & Role */}
+        {/* Step 1 — You & your company */}
         {step === 1 && (
           <Card>
             <Progress />
             <H2>Tell us about yourself</H2>
-            <Sub>This helps Unmute tailor every suggestion to your specific marketing role.</Sub>
-            <Field label="Your Name *" value={profile.name} onChange={v => update("name", v)} placeholder="e.g. Sarah" />
-            <Field label="Your Job Title *" value={profile.role} onChange={v => update("role", v)} placeholder="e.g. Head of Paid Media" />
-            <NavButtons />
+            <Sub>Unmute uses this to understand your company and your world, so every suggestion fits.</Sub>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+              <div><label style={fieldLabel}>Your name *</label><input value={profile.name} onChange={e => update("name", e.target.value)} placeholder="e.g. Sarah Cohen" style={textInput} /></div>
+              <div><label style={fieldLabel}>Job title *</label><input value={profile.role} onChange={e => update("role", e.target.value)} placeholder="e.g. Social Media Manager" style={textInput} /></div>
+              <div><label style={fieldLabel}>Company *</label><input value={profile.company || ""} onChange={e => update("company", e.target.value)} placeholder="e.g. eToro" style={textInput} /></div>
+              <div><label style={fieldLabel}>Company website</label><input value={profile.companyWebsite || ""} onChange={e => update("companyWebsite", e.target.value)} placeholder="e.g. etoro.com (helps us find the right one)" style={textInput} /></div>
+            </div>
+            {!showLinkedin && !profile.linkedinText ? (
+              <button type="button" onClick={() => setShowLinkedin(true)} style={{ background: "none", border: "none", padding: 0, color: "#6D28D9", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                ＋ Tip: paste your LinkedIn About / Experience for even sharper suggestions (optional)
+              </button>
+            ) : (
+              <div>
+                <label style={fieldLabel}>Your LinkedIn About / Experience (optional)</label>
+                <textarea value={profile.linkedinText || ""} onChange={e => update("linkedinText", e.target.value)} rows={4} placeholder="On LinkedIn, copy your About section and your recent roles, and paste them here." style={{ ...textInput, resize: "vertical" }} />
+              </div>
+            )}
+            <NavButtons onNext={() => { setStep(2); runCompanyLookup(); }} />
           </Card>
         )}
 
-        {/* Step 2 — Marketing Role */}
+        {/* Step 2 — Company card */}
         {step === 2 && (
           <Card>
             <Progress />
-            <H2>What best describes your role?</H2>
-            <Sub>We will pre-load the most relevant marketing skills — customise them in the next step.</Sub>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 8 }}>
-              {MARKETING_ROLES.map(r => (
-                <button key={r.id} onClick={() => selectRole(r)} style={{ background: profile.roleId === r.id ? "#F5F3FF" : "white", color: profile.roleId === r.id ? "#5B21B6" : "#374151", border: profile.roleId === r.id ? "2px solid #6D28D9" : "2px solid #E4DCFB", borderRadius: 12, padding: "16px 18px", fontSize: 14, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: profile.roleId === r.id ? 700 : 500, display: "flex", alignItems: "center", gap: 10, textAlign: "left", transition: "all 0.15s" }}>
-                  <span style={{ fontSize: 20 }}>{r.icon}</span>
-                  <span>{r.label}</span>
-                  {profile.roleId === r.id && <span style={{ marginLeft: "auto", color: "#6D28D9" }}>✓</span>}
-                </button>
-              ))}
-            </div>
-            <NavButtons disabled={!profile.roleId} />
+            <H2>Is this {profile.company}?</H2>
+            <Sub>We looked your company up. Check it's right and fix anything that isn't. This context goes into every brief and suggestion.</Sub>
+            {companyState.loading ? <Thinking text={`Looking up ${profile.company}…`} /> : (
+              <>
+                {companyState.error && <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 12 }}>{companyState.error}</div>}
+                {profile.brain?.company && <CompanyCardEditor card={profile.brain.company} onChange={c => setBrainPart("company", c)} />}
+              </>
+            )}
+            <NavButtons nextLabel="Looks right →" disabled={companyState.loading || !profile.brain?.company?.summary?.trim()} />
           </Card>
         )}
 
-        {/* Step 3 — Platforms */}
+        {/* Step 3 — Role in their own words */}
         {step === 3 && (
           <Card>
             <Progress />
-            <H2>Which platforms do you work with?</H2>
-            <Sub>Select all that apply — Unmute will reference platform-specific knowledge in your suggestions.</Sub>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-              {PLATFORMS.map(p => (
-                <button key={p.id} onClick={() => togglePlatform(p.label)} style={{ background: profile.platforms.includes(p.label) ? "#EDE9FE" : "#FAFAFA", color: profile.platforms.includes(p.label) ? "#5B21B6" : "#374151", border: profile.platforms.includes(p.label) ? "1.5px solid #C4B5FD" : "1.5px solid #E4DCFB", borderRadius: 10, padding: "12px 14px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: profile.platforms.includes(p.label) ? 600 : 400, display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}>
-                  <span style={{ fontSize: 18 }}>{p.icon}</span>
-                  <span style={{ flex: 1 }}>{p.label}</span>
-                  {profile.platforms.includes(p.label) && <span style={{ color: "#6D28D9", fontSize: 13 }}>✓</span>}
-                </button>
-              ))}
-            </div>
-            {profile.platforms.length > 0 && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6D28D9", fontFamily: "monospace" }}>✓ {profile.platforms.length} platform{profile.platforms.length !== 1 ? "s" : ""} selected</p>}
-            <NavButtons disabled={profile.platforms.length === 0} />
+            <H2>What do you do, in your own words?</H2>
+            <Sub>A sentence or two is plenty. Unmute works out the channels, platforms and KPIs from it.</Sub>
+            <textarea value={profile.roleDescription || ""} onChange={e => update("roleDescription", e.target.value)} rows={4} autoFocus
+              placeholder={`e.g. "I manage social media for ${profile.company || "eToro"}: Instagram, TikTok and our creator partnerships." or "I run programmatic buying across all markets and own our tracking and measurement setup."`}
+              style={{ ...textInput, resize: "vertical", fontSize: 15, lineHeight: 1.6 }} />
+            <NavButtons onNext={() => { setStep(4); runRoleInference(); }} disabled={(profile.roleDescription || "").trim().length < 15} />
           </Card>
         )}
 
-        {/* Step 4 — Expertise */}
+        {/* Step 4 — Role insights + platforms */}
         {step === 4 && (
           <Card>
             <Progress />
-            <H2>Your areas of expertise</H2>
-            <Sub>Pre-loaded from your role — add or remove anything to match your actual expertise.</Sub>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-              {[...new Set([...MARKETING_ROLES.flatMap(r => r.skills)])].sort().map(skill => (
-                <button key={skill} onClick={() => toggleSkill(skill)} style={{ background: profile.expertise.includes(skill) ? "#EDE9FE" : "#FAFAFA", color: profile.expertise.includes(skill) ? "#5B21B6" : "#374151", border: profile.expertise.includes(skill) ? "1px solid #C4B5FD" : "1px solid #E4DCFB", borderRadius: 20, padding: "8px 15px", fontSize: 13, fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: profile.expertise.includes(skill) ? 600 : 400 }}>
-                  {profile.expertise.includes(skill) ? "✓ " : ""}{skill}
-                </button>
-              ))}
-            </div>
-            <SkillAdder onAdd={(skill) => { if (!profile.expertise.includes(skill)) setProfile(p => ({ ...p, expertise: [...p.expertise, skill] })); }} />
-            {profile.expertise.length > 0 && <p style={{ margin: "10px 0 0", fontSize: 12, color: "#6D28D9", fontFamily: "monospace" }}>✓ {profile.expertise.length} skills selected</p>}
-            <NavButtons />
+            <H2>Here's how we understand your role</H2>
+            <Sub>Edit anything that's off, and confirm the platforms you use. We've pre-selected the ones that fit what you told us.</Sub>
+            {roleState.loading ? <Thinking text="Working out what your role involves…" /> : (
+              <>
+                {roleState.error && <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", color: "#92400E", borderRadius: 10, padding: "10px 14px", fontSize: 13, marginBottom: 12 }}>{roleState.error} You can fill these in yourself.</div>}
+                {profile.brain?.role && <RoleInsightsEditor role={profile.brain.role} onChange={r => setBrainPart("role", r)} />}
+                <div style={{ marginTop: 18 }}>
+                  <label style={fieldLabel}>Platforms & tools you use *</label>
+                  <ChipPicker options={PLATFORMS.map(x => x.label)} selected={profile.platforms} onChange={v => update("platforms", v)} addPlaceholder="Add a tool, e.g. AppsFlyer, GA4, Sprout Social" />
+                </div>
+              </>
+            )}
+            <NavButtons disabled={roleState.loading || profile.platforms.length === 0} />
           </Card>
         )}
 
-        {/* Step 5 — Specialist profiles (optional) */}
+        {/* Step 5 — Your profiles */}
         {step === 5 && (
           <Card>
             <Progress />
-            <H2>Do you wear different hats?</H2>
-            <Sub>If your expertise spans different specialities, create a specialist profile for each. For example, a programmatic buyer who also leads tracking and measurement meetings. You'll pick the right one when you prep a meeting, and suggestions will lean on that expertise. Optional, and you can add them later from Edit profile.</Sub>
-            <SpecialtiesManager specialties={profile.specialties || []} onChange={list => update("specialties", list)} mainProfile={profile} />
-            <NavButtons nextLabel={(profile.specialties || []).length ? "Continue →" : "Skip for now →"} disabled={false} />
-          </Card>
-        )}
-
-        {/* Step 5 — Company & Work Context */}
-        {step === 6 && (
-          <Card>
-            <Progress />
-            <H2>Tell us about your work</H2>
-            <Sub>The more context you give, the more relevant your suggestions will be.</Sub>
-            <Field label="Company / Organisation" value={profile.company || ""} onChange={v => update("company", v)} placeholder="e.g. eToro, Unilever, Digibright" />
-            <Field label="What do you do day to day?" value={profile.jobContext || ""} onChange={v => update("jobContext", v)} placeholder="e.g. I manage paid media across Meta and Google, run incrementality tests, and report performance to senior stakeholders." multiline rows={3} />
-            <Field label="What are you typically trying to achieve in meetings?" value={profile.meetingObjective || ""} onChange={v => update("meetingObjective", v)} placeholder="e.g. Get budget approved, defend channel performance, influence media strategy." multiline rows={2} />
-            <Field label="Who do you typically meet with?" value={profile.typicalAudience || ""} onChange={v => update("typicalAudience", v)} placeholder="e.g. CMO, CFO, agency partners, cross-functional teams" />
-            <div style={{ marginTop: 18 }}>
-              <label style={{ fontSize: 12, color: "#6D28D9", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, display: "block", marginBottom: 10 }}>How do you want to come across?</label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {COMMUNICATION_STYLES.map(style => (
-                  <button key={style.id} onClick={() => update("communicationStyle", style.id)} style={{ background: profile.communicationStyle === style.id ? "#F5F3FF" : "white", border: profile.communicationStyle === style.id ? "2px solid #6D28D9" : "2px solid #E4DCFB", borderRadius: 10, padding: "14px 14px", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "flex-start", gap: 8 }}>
-                    <span style={{ fontSize: 18, flexShrink: 0 }}>{style.icon}</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: profile.communicationStyle === style.id ? "#5B21B6" : "#1E1033", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.label}</div>
-                      <div style={{ fontSize: 12, color: "#9B8FC0", lineHeight: 1.4, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{style.desc}</div>
+            <H2>Your profiles</H2>
+            <Sub>Your main profile covers your general role. If you also go into meetings wearing a different hat, like tracking and measurement, add a specialist profile for it. You'll pick the right one when you prep a meeting, and Unmute will focus only on that.</Sub>
+            {suggested.filter(sg => !(profile.specialties || []).some(sp => sp.name === sg.name)).length > 0 && (
+              <div style={{ background: "#F5F3FF", border: "1px dashed #A78BFA", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+                <div style={{ fontSize: 12.5, color: "#5B21B6", fontWeight: 600, marginBottom: 8 }}>✨ Based on what you told us, you might want:</div>
+                {suggested.filter(sg => !(profile.specialties || []).some(sp => sp.name === sg.name)).map(sg => (
+                  <div key={sg.name} style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 16 }}>{sg.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1E1033" }}>{sg.name}</div>
+                      <div style={{ fontSize: 12, color: "#7C6BA8" }}>{sg.context}</div>
                     </div>
-                  </button>
+                    <button type="button" onClick={() => update("specialties", [...(profile.specialties || []), { id: `sp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: sg.name, icon: sg.icon, platforms: sg.platforms, context: sg.context, expertise: [], audience: "" }])}
+                      style={{ background: "#6D28D9", color: "white", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>＋ Add</button>
+                  </div>
                 ))}
               </div>
-            </div>
-            <NavButtons disabled={false} />
+            )}
+            <SpecialtiesManager specialties={profile.specialties || []} onChange={list => update("specialties", list)} mainProfile={{ ...profile, expertise: profile.brain?.role?.responsibilities || [] }} toolOptions={profile.platforms} />
+            <NavButtons nextLabel={(profile.specialties || []).length ? "Continue →" : "Just my main profile →"} disabled={false} />
           </Card>
         )}
 
         {/* Step 6 — Meeting Type */}
-        {step === 7 && (
+        {step === 6 && (
           <Card>
             <Progress />
-            <H2>What type of calls do you attend most?</H2>
-            <Sub>This sets the default context so suggestions are always relevant to your meeting type.</Sub>
+            <H2>Your meetings</H2>
+            <Sub>What kind of calls you're in and who's in them changes how Unmute pitches its suggestions.</Sub>
+            <label style={fieldLabel}>Calls you attend most</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {MEETING_TYPES.map(type => (
                 <button key={type} onClick={() => update("meetingType", type)} style={{ background: profile.meetingType === type ? "#6D28D9" : "white", color: profile.meetingType === type ? "white" : "#374151", border: profile.meetingType === type ? "2px solid #6D28D9" : "2px solid #E4DCFB", borderRadius: 10, padding: "12px 16px", fontSize: 13, cursor: "pointer", fontFamily: "'Plus Jakarta Sans', sans-serif", fontWeight: profile.meetingType === type ? 600 : 400, textAlign: "left" }}>
@@ -1255,12 +1535,22 @@ function Onboarding({ onComplete, initialName = "" }) {
                 </button>
               ))}
             </div>
+            <div style={{ marginTop: 18 }}>
+              <label style={fieldLabel}>Who do you usually meet with?</label>
+              <input value={profile.typicalAudience || ""} onChange={e => update("typicalAudience", e.target.value)} placeholder="e.g. CMO, regional marketing managers, agency partners, analytics team" style={textInput} />
+            </div>
+            <div style={{ marginTop: 18 }}>
+              <label style={fieldLabel}>How do you want to come across?</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                {COMMUNICATION_STYLES.map(st => <button type="button" key={st.id} title={st.desc} onClick={() => update("communicationStyle", st.id)} style={chip(profile.communicationStyle === st.id)}>{st.icon} {st.label}</button>)}
+              </div>
+            </div>
             <NavButtons disabled={false} />
           </Card>
         )}
 
         {/* Step 7 — Language */}
-        {step === 8 && (
+        {step === 7 && (
           <Card>
             <Progress />
             <H2>What language are your meetings in?</H2>
@@ -1273,6 +1563,17 @@ function Onboarding({ onComplete, initialName = "" }) {
               ))}
             </div>
             <NavButtons disabled={false} />
+          </Card>
+        )}
+
+        {/* Step 8 — Review the profile brain */}
+        {step === 8 && (
+          <Card>
+            <Progress />
+            <H2>Here's what Unmute understands about you</H2>
+            <Sub>This is what Unmute will focus on in your meetings. Everything is editable: remove what's off, add what's missing. You can change it any time in Edit profile.</Sub>
+            <BrainReview profile={profile} onChange={setProfile} building={brainState.loading} error={brainState.error} onRebuild={() => runBrainBuild(true)} />
+            <NavButtons nextLabel="Looks good →" disabled={brainState.loading || !profile.brain?.profiles?.main} />
           </Card>
         )}
 
@@ -1827,17 +2128,34 @@ export default function App() {
       onRedoOnboarding={() => { if (window.confirm("Start the guided setup again? Your current profile stays until you finish.")) { localStorage.removeItem("unmute_mkt_onboarded"); setOnboarded(false); setEditingProfile(false); } }}
     />
   );
-  return <MeetingApp baseProfile={profile} user={user} onEditProfile={() => setEditingProfile(true)} />;
+  const handleProfileChange = async (p) => {
+    localStorage.setItem("unmute_mkt_profile", JSON.stringify(p));
+    setProfile(p);
+    if (user) await saveProfile(user.id, p);
+  };
+  return <MeetingApp baseProfile={profile} user={user} onEditProfile={() => setEditingProfile(true)} onProfileChange={handleProfileChange} />;
 }
 
 // ── MEETING APP ────────────────────────────────────────────────────────────
-function MeetingApp({ baseProfile, user, onEditProfile }) {
+function MeetingApp({ baseProfile, user, onEditProfile, onProfileChange }) {
   // Which profile this meeting uses: main (null) or a specialist profile id
   const [specialtyId, setSpecialtyIdState] = useState(() => {
     try { const id = localStorage.getItem("unmute_active_specialty"); return (baseProfile.specialties || []).some(sp => sp.id === id) ? id : null; } catch { return null; }
   });
   const setSpecialtyId = (id) => { setSpecialtyIdState(id); try { id ? localStorage.setItem("unmute_active_specialty", id) : localStorage.removeItem("unmute_active_specialty"); } catch { /* storage blocked */ } };
   const profile = useMemo(() => effectiveProfile(baseProfile, specialtyId), [baseProfile, specialtyId]);
+
+  // Post-meeting: add a concept that came up to the profile used for this meeting
+  const [addedSuggestions, setAddedSuggestions] = useState([]);
+  const addToProfile = (term) => {
+    const id = specialtyId || "main";
+    const focus = baseProfile.brain?.profiles?.[id];
+    if (!focus) return;
+    const add = (list) => (list || []).some(x => x.toLowerCase() === term.toLowerCase()) ? list : [...(list || []), term];
+    const updated = { ...trackConceptEdit(focus, add(focus.focusConcepts)), vocabulary: add(focus.vocabulary) };
+    onProfileChange({ ...baseProfile, brain: { ...baseProfile.brain, profiles: { ...baseProfile.brain.profiles, [id]: updated } } });
+    setAddedSuggestions(a => [...a, term]);
+  };
   const [mode, setMode] = useState("hub");
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 820);
   const [viewWidth, setViewWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1440);
@@ -2123,6 +2441,7 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
       stream,
       languageCode: language.code,
       getToken: getTranscriptionToken,
+      keyterms: keytermsFor(profile),
       onFinal: (text) => {
         const entry = { id: Date.now() + Math.random(), text, speaker: "them" };
         transcriptRef.current = [...transcriptRef.current, entry];
@@ -2137,7 +2456,7 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
     });
     meetingTranscriberRef.current = transcriber;
     transcriber.start();
-  }, [language]);
+  }, [language, profile]);
 
   const disconnectMeetingAudio = useCallback(() => {
     stopMeetingTranscriber();
@@ -2258,6 +2577,7 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
           stream: micStream,
           languageCode: language.code,
           getToken: getTranscriptionToken,
+          keyterms: keytermsFor(profile),
           retryHint: "Switched to Chrome's built-in speech recognition.",
           onFinal: addMicEntry,
           onStatus: (status, message) => {
@@ -2285,7 +2605,7 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
     }
     if (!usingDeepgram) startWebSpeech();
     if (streamIsLive(meetingStreamRef.current) && !meetingTranscriberRef.current) startMeetingTranscriber(meetingStreamRef.current);
-  }, [language, startMeetingTranscriber, startWebSpeech]);
+  }, [language, profile, startMeetingTranscriber, startWebSpeech]);
 
   const endMeeting = useCallback(() => {
     shouldListenRef.current = false;
@@ -2316,7 +2636,7 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
     try {
       const recentTranscript = formatTranscript(transcriptRef.current.slice(-10));
       const historyText = chatHistory.slice(-6).map(m => `${m.role === "user" ? "You" : "AI"}: ${m.text}`).join("\n");
-      const prompt = `You are a real-time AI assistant for a ${profile.role}${profile.company ? " at " + profile.company : ""} on a marketing video call.\n${profile.company ? "Draw on your knowledge of " + profile.company + " — their industry, products, competitors and business model." : ""}\nPlatforms they use: ${profile.platforms.join(", ")}\nExpertise: ${profile.expertise.join(", ")}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nAnswer in 1-3 sentences. Reference platform-specific knowledge only if directly relevant. No preamble.`;
+      const prompt = `You are a real-time AI assistant on a marketing video call, helping this person:\n${whoBlock(profile)}\n${profile.company ? "Draw on your knowledge of " + profile.company + " — their industry, products, competitors and business model." : ""}\nRecent transcript: "${recentTranscript || "No transcript yet"}"\n${historyText ? "Chat history:\n" + historyText : ""}\n\nQuestion: ${userMsg}\n\nAnswer in 1-3 sentences. Reference platform-specific knowledge only if directly relevant. No preamble.`;
       const raw = await callClaudeFast(prompt);
       const cleanResponse = raw.replace(/^\[|\]$/g, "").replace(/^"|"$/g, "").trim();
       setChatHistory(prev => [...prev, { role: "ai", text: cleanResponse }]);
@@ -2450,6 +2770,17 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
             Hi {profile.name ? profile.name.split(" ")[0] : "there"}
           </h1>
           <p style={{ margin: "0 0 26px", fontSize: 14, color: "#6b7280" }}>{profile.role}{profile.company ? ` · ${profile.company}` : ""}</p>
+
+          {!hasBrain(baseProfile) && (
+            <button onClick={onEditProfile} style={{ width: "100%", textAlign: "left", cursor: "pointer", background: "linear-gradient(135deg, #6D28D9, #8B5CF6)", color: "white", border: "none", borderRadius: 16, padding: "16px 20px", marginBottom: 14, display: "flex", alignItems: "center", gap: 14, fontFamily: "'Plus Jakarta Sans', sans-serif", boxShadow: "0 6px 20px rgba(109,40,217,0.3)" }}>
+              <span style={{ fontSize: 26 }}>✨</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: "block", fontWeight: 700, fontSize: 15 }}>Upgrade your profile</span>
+                <span style={{ display: "block", fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>Let Unmute learn your company, role and specialities for much sharper briefs and suggestions.</span>
+              </span>
+              <span style={{ fontSize: 18 }}>→</span>
+            </button>
+          )}
 
           <div style={{ display: "grid", gap: 12 }}>
             {tiles.map(t => (
@@ -2721,6 +3052,29 @@ function MeetingApp({ baseProfile, user, onEditProfile }) {
                   {summary.next_meeting_prep.map((n, i) => <div key={i} style={{ display: "flex", gap: 12 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: "#6D28D9", flexShrink: 0, marginTop: 6 }} /><p style={{ margin: 0, fontSize: 13.5, color: "#374151", lineHeight: 1.6 }}>{n.action}</p></div>)}
                 </div>
               </div>
+              {Array.isArray(summary.profile_suggestions) && summary.profile_suggestions.length > 0 && profile.brain?.profiles && (
+                <div style={{ background: "white", border: "1.5px solid #C4B5FD", borderRadius: 14, overflow: "hidden", textAlign: "left" }}>
+                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #EDE9FE", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: "#EDE9FE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✨</div>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: "#3B0764", fontFamily: "'Fraunces', Georgia, serif" }}>Add to your {profile.activeSpecialty ? `"${profile.activeSpecialty.name}"` : "main"} profile?</span>
+                  </div>
+                  <div style={{ padding: "14px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <p style={{ margin: 0, fontSize: 12.5, color: "#7C6BA8" }}>These came up in this meeting. Adding them helps Unmute focus on them next time.</p>
+                    {summary.profile_suggestions.filter(sg => sg?.term).map(sg => {
+                      const added = addedSuggestions.includes(sg.term);
+                      return (
+                        <div key={sg.term} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13.5, color: "#1E1033" }}>{sg.term}</div>
+                            {sg.why && <div style={{ fontSize: 12.5, color: "#6b7280" }}>{sg.why}</div>}
+                          </div>
+                          <button onClick={() => addToProfile(sg.term)} disabled={added} style={{ background: added ? "#DCFCE7" : "#6D28D9", color: added ? "#166534" : "white", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: added ? "default" : "pointer", whiteSpace: "nowrap" }}>{added ? "✓ Added" : "＋ Add"}</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

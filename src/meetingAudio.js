@@ -75,7 +75,9 @@ export function streamIsLive(stream) {
 
 // Streams one capture stream to Deepgram and reports finished sentences.
 export class MeetingTranscriber {
-  constructor({ stream, languageCode, getToken, onFinal, onStatus, retryHint }) {
+  constructor({ stream, languageCode, getToken, onFinal, onStatus, retryHint, keyterms }) {
+    // Names and jargon from the user's profile brain, so Deepgram hears them right
+    this.keyterms = (keyterms || []).slice(0, 50);
     this.retryHint = retryHint || "Click \"Hear the meeting\" to try again.";
     this.audioStream = new MediaStream(stream.getAudioTracks());
     this.language = DEEPGRAM_LANG[languageCode] || "en";
@@ -110,6 +112,7 @@ export class MeetingTranscriber {
       interim_results: "false",
       endpointing: "300",
     });
+    for (const term of this.keyterms) params.append("keyterm", term);
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, ["bearer", token]);
     this.ws = ws;
 

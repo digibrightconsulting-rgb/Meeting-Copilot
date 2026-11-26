@@ -35,6 +35,10 @@ export default async function handler(req, res) {
         context: String(s.context || "").slice(0, 1500),
         audience: String(s.audience || "").slice(0, 300),
       })).filter(s => s.id && s.name);
+      // The "brain" is the AI-built understanding of the user (company, role,
+      // per-profile focus). Store it as-is but cap its size.
+      let brain = profile.brain && typeof profile.brain === "object" ? profile.brain : null;
+      if (brain && JSON.stringify(brain).length > 80000) return res.status(413).json({ error: "Profile is too large to save." });
       const response = await fetch(`${SUPABASE_URL}/rest/v1/profiles?on_conflict=id`, {
         method: "POST",
         headers: {
@@ -58,6 +62,10 @@ export default async function handler(req, res) {
           meeting_type: profile.meetingType,
           language: profile.language,
           specialties,
+          company_website: String(profile.companyWebsite || "").slice(0, 300),
+          role_description: String(profile.roleDescription || "").slice(0, 2000),
+          linkedin_text: String(profile.linkedinText || "").slice(0, 6000),
+          brain,
           updated_at: new Date().toISOString(),
         }),
       });
